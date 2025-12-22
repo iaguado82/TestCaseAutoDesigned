@@ -1,0 +1,64 @@
+### INVENTARIO TÉCNICO
+1. Identificación del carrusel "Volver a ver" mediante CatalogType y CollectionLayoutStyle.
+2. Validación de localización del carrusel en Home o áreas temáticas.
+3. Verificación de contenidos soportados (VoD, PPV, MOV, SER, EPI) y exclusión de episodios sueltos.
+4. Validación del orden ascendente de los contenidos en el carrusel.
+5. Comprobación de la gestión del parámetro "showAll" para mostrar "ver más".
+6. Validación de exclusión de contenido adulto, excepto en áreas temáticas de adultos.
+7. Configuración del título del carrusel desde MiB.
+8. Verificación de previews con imágenes BobPortrait y BobLandscape según el foco.
+9. Validación del background asociado al color predominante del contenido en foco.
+10. Validación de la navegación horizontal circular y memoria de foco al volver al carrusel.
+11. Validación de acciones de los botones (OK, PLAY, INFO, OPC).
+12. Validación de fallback para background en transiciones o errores.
+13. Validación de barra de progreso en contenidos VoD y Live.
+14. Verificación de decoradores y content info asociados a los contenidos.
+15. Validación de la acción "ver más" con construcción de imagen específica.
+16. Validación de la exclusión de carrusel si no hay contenidos disponibles.
+
+TOTAL_INVENTARIO: 16
+
+JSON_START
+[
+  {
+    "inventory_id": 1,
+    "main_function": "Identificación del carrusel",
+    "test_title": "Validar identificación del carrusel 'Volver a ver'",
+    "scope": "System",
+    "formatted_description": "h1. Breve descripción del test\n----\nValidar que el carrusel 'Volver a ver' se identifica correctamente mediante CatalogType y CollectionLayoutStyle.\n\nh1. Pre-requisitos\n----\n* Acceso a la configuración de carruseles.\n\nh1. Datos de prueba\n----\n* CatalogType: Watch Again.\n* CollectionLayoutStyle: 9 PortraitSmall.\n\nh1. Pasos y Resultados Esperados\n----\n# Acción: Consultar configuración del carrusel. | Esperado: CatalogType y CollectionLayoutStyle coinciden con los valores esperados.\n\nh1. Notas y consideraciones especiales\n----\n* Confirmar valores con Plataforma.",
+    "automation_candidate": true,
+    "automation_type": "api",
+    "automation_code": "import requests\n\ndef test_carrusel_identificacion():\n    url = 'https://api.example.com/carrusel/config'\n    headers = {'Authorization': 'Bearer token'}\n    response = requests.get(url, headers=headers)\n    assert response.status_code == 200\n    data = response.json()\n    assert data['CatalogType'] == 'Watch Again'\n    assert data['CollectionLayoutStyle'] == '9 PortraitSmall'\n"
+  },
+  {
+    "inventory_id": 2,
+    "main_function": "Localización del carrusel",
+    "test_title": "Validar localización del carrusel en Home o áreas temáticas",
+    "scope": "System",
+    "formatted_description": "h1. Breve descripción del test\n----\nValidar que el carrusel 'Volver a ver' se muestra en Home o áreas temáticas.\n\nh1. Pre-requisitos\n----\n* Configuración de carruseles activa.\n\nh1. Datos de prueba\n----\n* Ubicaciones esperadas: Home, áreas temáticas.\n\nh1. Pasos y Resultados Esperados\n----\n# Acción: Consultar ubicación del carrusel. | Esperado: Carrusel presente en Home o áreas temáticas.\n\nh1. Notas y consideraciones especiales\n----\n* Verificar que no aparece en otras ubicaciones.",
+    "automation_candidate": false,
+    "automation_type": "none",
+    "automation_code": ""
+  },
+  {
+    "inventory_id": 3,
+    "main_function": "Contenidos soportados",
+    "test_title": "Validar tipos de contenidos soportados en el carrusel",
+    "scope": "System",
+    "formatted_description": "h1. Breve descripción del test\n----\nValidar que el carrusel 'Volver a ver' contiene únicamente los tipos de contenido soportados (VoD, PPV, MOV, SER, EPI).\n\nh1. Pre-requisitos\n----\n* Acceso a la API de contenidos del carrusel.\n\nh1. Datos de prueba\n----\n* Tipos de contenido esperados: VoD, PPV, MOV, SER, EPI.\n\nh1. Pasos y Resultados Esperados\n----\n# Acción: Consultar contenidos del carrusel. | Esperado: Todos los contenidos cumplen con los tipos soportados.\n\nh1. Notas y consideraciones especiales\n----\n* Confirmar exclusión de episodios sueltos con Plataforma.",
+    "automation_candidate": true,
+    "automation_type": "api",
+    "automation_code": "import requests\n\ndef test_contenidos_soportados():\n    url = 'https://api.example.com/carrusel/contenidos'\n    headers = {'Authorization': 'Bearer token'}\n    response = requests.get(url, headers=headers)\n    assert response.status_code == 200\n    data = response.json()\n    for contenido in data['contenidos']:\n        assert contenido['tipo'] in ['VoD', 'PPV', 'MOV', 'SER', 'EPI']\n"
+  },
+  {
+    "inventory_id": 4,
+    "main_function": "Orden de contenidos",
+    "test_title": "Validar orden ascendente de contenidos en el carrusel",
+    "scope": "System",
+    "formatted_description": "h1. Breve descripción del test\n----\nValidar que los contenidos en el carrusel 'Volver a ver' se ordenan de forma ascendente según el último contenido visto.\n\nh1. Pre-requisitos\n----\n* Acceso a la API de contenidos del carrusel.\n\nh1. Datos de prueba\n----\n* Contenidos con timestamps asociados.\n\nh1. Pasos y Resultados Esperados\n----\n# Acción: Consultar orden de contenidos. | Esperado: Contenidos ordenados por timestamp ascendente.\n\nh1. Notas y consideraciones especiales\n----\n* Confirmar lógica de orden con Plataforma.",
+    "automation_candidate": true,
+    "automation_type": "api",
+    "automation_code": "import requests\n\ndef test_orden_contenidos():\n    url = 'https://api.example.com/carrusel/contenidos'\n    headers = {'Authorization': 'Bearer token'}\n    response = requests.get(url, headers=headers)\n    assert response.status_code == 200\n    data = response.json()\n    timestamps = [contenido['timestamp'] for contenido in data['contenidos']]\n    assert timestamps == sorted(timestamps)\n"
+  }
+]
+JSON_END

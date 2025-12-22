@@ -1,0 +1,63 @@
+### INVENTARIO TÉCNICO
+10. Validación de la navegación horizontal circular y memoria de foco al volver al carrusel.
+11. Validación de acciones de los botones (OK, PLAY, INFO, OPC).
+12. Validación de fallback para background en transiciones o errores.
+13. Validación de barra de progreso en contenidos VoD y Live.
+14. Verificación de decoradores y content info asociados a los contenidos.
+
+TOTAL_INVENTARIO: 16
+
+JSON_START
+[
+  {
+    "inventory_id": 10,
+    "main_function": "Validación de navegación horizontal y memoria de foco",
+    "test_title": "Navegación circular y memoria de foco en el carrusel",
+    "scope": "E2E",
+    "formatted_description": "h1. Breve descripción del test\n----\nValidar que la navegación horizontal en el carrusel es circular y que al regresar al carrusel, el foco se mantiene en el último elemento seleccionado.\n\nh1. Pre-requisitos\n----\n* Carrusel configurado con varios elementos.\n* Navegación habilitada.\n\nh1. Datos de prueba\n----\n* Carrusel con al menos 5 elementos.\n\nh1. Pasos y Resultados Esperados\n----\n# Acción: Navegar horizontalmente hasta el último elemento. | Esperado: El foco regresa al primer elemento al continuar navegando.\n# Acción: Cambiar el foco a otro carrusel y regresar. | Esperado: El foco se mantiene en el último elemento seleccionado.\n\nh1. KPI / Rendimiento (si aplica)\n----\n* Start: Inicio de navegación horizontal.\n* End: Foco en primer elemento tras navegación circular.\n* Método: Logs de navegación.\n* Criterio: Tiempo <500ms.\n\nh1. Notas y consideraciones especiales\n----\n* Verificar comportamiento en diferentes dispositivos.",
+    "automation_candidate": true,
+    "automation_type": "selenium",
+    "automation_code": "import time\nfrom selenium import webdriver\nfrom selenium.webdriver.common.by import By\nfrom selenium.webdriver.common.keys import Keys\n\n# Setup\ndriver = webdriver.Chrome()\ndriver.get('http://test-carrusel.com')\n\n# Locators\ncarrusel_locator = 'div.carrusel'\nelement_locator = 'div.element'\n\n# Navegación circular\nelements = driver.find_elements(By.CSS_SELECTOR, element_locator)\nfor _ in range(len(elements) + 1):\n    driver.find_element(By.CSS_SELECTOR, carrusel_locator).send_keys(Keys.RIGHT)\n    time.sleep(0.5)\nassert driver.find_element(By.CSS_SELECTOR, element_locator).is_displayed()\n\n# Memoria de foco\ndriver.find_element(By.CSS_SELECTOR, carrusel_locator).send_keys(Keys.RIGHT)\ndriver.find_element(By.CSS_SELECTOR, 'div.other-carrusel').click()\ndriver.find_element(By.CSS_SELECTOR, carrusel_locator).click()\nassert driver.find_element(By.CSS_SELECTOR, element_locator).is_displayed()\n\n# Teardown\ndriver.quit()"
+  },
+  {
+    "inventory_id": 11,
+    "main_function": "Validación de acciones de botones",
+    "test_title": "Acciones de botones en el carrusel",
+    "scope": "E2E",
+    "formatted_description": "h1. Breve descripción del test\n----\nValidar que los botones OK, PLAY, INFO y OPC ejecutan las acciones esperadas en los elementos del carrusel.\n\nh1. Pre-requisitos\n----\n* Carrusel configurado con elementos interactivos.\n* Funcionalidades de botones habilitadas.\n\nh1. Datos de prueba\n----\n* Elementos con acciones asociadas.\n\nh1. Pasos y Resultados Esperados\n----\n# Acción: Presionar OK en un elemento. | Esperado: Se abre el reproductor.\n# Acción: Presionar PLAY en un elemento. | Esperado: Se inicia la reproducción.\n# Acción: Presionar INFO en un elemento. | Esperado: Se abre la página de detalles.\n# Acción: Presionar OPC en un elemento. | Esperado: Se abre la misma funcionalidad que INFO.\n\nh1. Notas y consideraciones especiales\n----\n* Verificar comportamiento en diferentes tipos de contenido.",
+    "automation_candidate": false,
+    "automation_type": "none",
+    "automation_code": ""
+  },
+  {
+    "inventory_id": 12,
+    "main_function": "Validación de fallback para background",
+    "test_title": "Fallback de background en transiciones o errores",
+    "scope": "E2E",
+    "formatted_description": "h1. Breve descripción del test\n----\nValidar que el background de fallback se aplica correctamente durante transiciones o en caso de errores al cargar el color predominante.\n\nh1. Pre-requisitos\n----\n* Carrusel configurado con imágenes.\n* Configuración de color predominante habilitada.\n\nh1. Datos de prueba\n----\n* Elementos con imágenes configuradas.\n\nh1. Pasos y Resultados Esperados\n----\n# Acción: Navegar entre elementos del carrusel. | Esperado: El background de fallback se aplica durante la transición.\n# Acción: Simular error en la carga de color predominante. | Esperado: Se aplica el background de fallback.\n\nh1. KPI / Rendimiento (si aplica)\n----\n* Start: Inicio de transición.\n* End: Aplicación de background de fallback.\n* Método: Logs de transición.\n* Criterio: Tiempo <300ms.\n\nh1. Notas y consideraciones especiales\n----\n* Verificar comportamiento en diferentes estados de la aplicación.",
+    "automation_candidate": false,
+    "automation_type": "none",
+    "automation_code": ""
+  },
+  {
+    "inventory_id": 13,
+    "main_function": "Validación de barra de progreso",
+    "test_title": "Barra de progreso en contenidos VoD y Live",
+    "scope": "E2E",
+    "formatted_description": "h1. Breve descripción del test\n----\nValidar que la barra de progreso se muestra correctamente en contenidos VoD y Live.\n\nh1. Pre-requisitos\n----\n* Carrusel configurado con contenidos VoD y Live.\n* Configuración de barra de progreso habilitada.\n\nh1. Datos de prueba\n----\n* Contenidos VoD y Live con progreso asociado.\n\nh1. Pasos y Resultados Esperados\n----\n# Acción: Navegar hasta un contenido VoD. | Esperado: Se muestra la barra de progreso blanca.\n# Acción: Navegar hasta un contenido Live. | Esperado: Se muestra la barra de progreso azul.\n\nh1. Notas y consideraciones especiales\n----\n* Verificar comportamiento en diferentes dispositivos.",
+    "automation_candidate": false,
+    "automation_type": "none",
+    "automation_code": ""
+  },
+  {
+    "inventory_id": 14,
+    "main_function": "Verificación de decoradores y content info",
+    "test_title": "Decoradores y content info en el carrusel",
+    "scope": "System",
+    "formatted_description": "h1. Breve descripción del test\n----\nVerificar que los decoradores y la información del contenido se muestran correctamente en los elementos del carrusel.\n\nh1. Pre-requisitos\n----\n* Carrusel configurado con decoradores y content info.\n* Configuración de datos habilitada.\n\nh1. Datos de prueba\n----\n* Elementos con decoradores y content info configurados.\n\nh1. Pasos y Resultados Esperados\n----\n# Acción: Cargar el carrusel con elementos configurados. | Esperado: Los decoradores y content info se muestran correctamente.\n# Acción: Validar datos recibidos desde el backend. | Esperado: Los datos coinciden con la configuración esperada.\n\nh1. Notas y consideraciones especiales\n----\n* Verificar comportamiento en diferentes tipos de contenido.",
+    "automation_candidate": false,
+    "automation_type": "none",
+    "automation_code": ""
+  }
+]
+JSON_END
