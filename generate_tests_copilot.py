@@ -23,7 +23,7 @@ jira_headers = {
     "Content-Type": "application/json"
 }
 
-# --- PLANTILLA WIKI MARKUP (MULTISTC-1) ---
+# --- PLANTILLA WIKI MARKUP ---
 JIRA_WIKI_TEMPLATE = """h1. Test short description
 ----
 {short_description}
@@ -128,7 +128,7 @@ def ask_copilot(prompt):
     payload = {
         "model": "gpt-4",
         "messages": [
-            {"role": "system", "content": "Eres un QA Senior de Telefónica. Diseñas Test Cases bajo el estándar MULTISTC-1 usando Jira Wiki Markup."},
+            {"role": "system", "content": "Eres un Ingeniero de QA Senior con experiencia en testing funcional, E2E, seguridad y validación de interfaces gráficas. Tu objetivo es diseñar un conjunto completo y estructurado de Test Cases basándote exclusivamente en la información proporcionada."},
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.1
@@ -159,46 +159,56 @@ def main():
     contexto = get_confluence_content(doc_url)
 
     prompt = f"""
+    Eres un Ingeniero de QA Senior. Tu objetivo es diseñar un conjunto completo de Test Cases basándote en la información proporcionada.
+
+    ### CONTEXTO
     US Summary: {us_summary}
     US Description: {us_data['fields']['description']}
-    Technical Context: {contexto[:2000]}
+    Technical Context (Confluence): {contexto[:2000]}
 
-    TAREA:
-    Genera 3 escenarios. Para cada uno:
-    1. Identifica la función principal de la US y crea un título: "[Nombre Funcion] Título del Test".
-    2. Crea una descripción usando exactamente este esquema de tablas de Jira:
+    ### INSTRUCCIONES GENERALES:
+    1. Analiza la User Story desde múltiples perspectivas de calidad (Funcional, E2E, Seguridad, UI, Integración, Usabilidad, Errores y Regresión).
+    2. NO inventes requisitos: si falta información, documenta la suposición como “Assumption”.
+    3. Prioriza los casos según impacto y riesgo.
+    4. Incluye escenarios positivos, negativos y edge cases.
+    5. Usa lenguaje claro, preciso y orientado a ejecución manual y/o automatización.
+
+    ### TAREA:
+    Genera 3 escenarios críticos. Para cada uno:
+    1. Identifica la función principal de la US y crea un título que empiece con dicha función entre corchetes: "[Nombre Funcion] Título del Test".
+    2. Crea una descripción usando exactamente este esquema de tablas de Jira Wiki:
     h1. Test short description
     ----
-    (Resumen corto)
+    (Resumen corto del escenario y perspectiva aplicada)
     h1. Pre-requisites
     ----
     ||ID||Pre-requisite||
-    |1|(Dato)|
+    |1|(Dato o Assumption inicial)|
     h1. Test Data
     ----
     ||ID||Test Data||
-    |1|(Dato)|
+    |1|(Dato necesario para la ejecución)|
     h1. Steps & Expected Results
     ----
     ||ID||Steps to Execute||Expected result||
-    |1|(Acción)|(Resultado)|
+    |1|(Acción técnica)|(Resultado esperado)|
     h1. Notes and Special Considerations
     ----
     ||ID||Description||
-    |1|(Nota)|
+    |1|(Notas sobre seguridad o UI)|
     h1. References (external to JIRA)
     ----
     ||ID||Description||Link||
-    |1|(Ref)|(URL)|
+    |1|(Ref. a Confluence)|(URL)|
 
-    3. Genera el código Selenium Python.
+    3. Genera el código Selenium Python correspondiente.
     4. Clasifica: 'E2E' (si cruza sistemas) o 'system' (funcional local).
 
     Responde SOLO JSON:
     [
       {{
-        "main_function": "Ejemplo: Login",
-        "test_title": "Acceso con huella",
+        "main_function": "...",
+        "test_title": "...",
         "formatted_description": "...",
         "automation_code": "...",
         "scope": "E2E"
@@ -206,7 +216,7 @@ def main():
     ]
     """
     
-    print(f"Analizando {us_key}...")
+    print(f"Analizando {us_key} con perspectiva Senior QA...")
     respuesta = ask_copilot(prompt)
     
     if respuesta:
