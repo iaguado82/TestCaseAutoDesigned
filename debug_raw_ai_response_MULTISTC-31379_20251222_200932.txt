@@ -1,0 +1,41 @@
+### Inventario Técnico
+1. Identificación del carrusel "Volver a ver" mediante CatalogType y CollectionLayoutStyle.
+2. Localización del carrusel en la home o en un área temática.
+3. Inclusión de contenidos reproducidos por completo (VoD, PPV, MOV, SER, EPI).
+4. Exclusión de series con nuevos episodios y episodios sueltos.
+5. Orden ascendente de los contenidos en el carrusel.
+6. Gestión del parámetro "showAll" para mostrar el elemento "ver más".
+7. Exclusión de contenido adulto salvo en áreas temáticas de adultos.
+8. Configuración del título del carrusel desde MiB.
+9. Representación visual del carrusel con imágenes BobPortrait y BobLandscape.
+10. Establecimiento de un color predominante como background al enfocar un elemento.
+11. Navegación horizontal circular y memoria de foco en navegación vertical.
+12. Comportamiento de los botones OK, PLAY, INFO y OPC en el carrusel.
+
+TOTAL_INVENTARIO: 12
+
+JSON_START
+[
+  {
+    "inventory_id": 1,
+    "main_function": "Identificación del carrusel",
+    "test_title": "Validar identificación del carrusel 'Volver a ver'",
+    "scope": "System",
+    "formatted_description": "h1. Breve descripción del test\n----\nValidar que el carrusel 'Volver a ver' se identifica correctamente mediante CatalogType y CollectionLayoutStyle.\n----\nh1. Pre-requisitos\n----\n||ID||Pre-requisite||\n|1|Acceso a la configuración de carruseles en la plataforma|\n|2|Carrusel 'Volver a ver' configurado con CatalogType y CollectionLayoutStyle|\n----\nh1. Datos de prueba\n----\n||ID||Test Data||\n|1|CatalogType: 'Watch Again', CollectionLayoutStyle: '9 PortraitSmall'|\n----\nh1. Pasos y Resultados Esperados\n----\n||ID||Steps to Execute||Expected result||\n|1|Acceder a la configuración del carrusel 'Volver a ver'|El carrusel muestra el CatalogType y CollectionLayoutStyle configurados correctamente|\n|2|Verificar que el carrusel se identifica como 'Volver a ver'|El carrusel es identificado correctamente|\n----\nh1. Notas y consideraciones especiales\n----\nNo hay visuales disponibles en Figma para este carrusel específico."
+  },
+  {
+    "inventory_id": 2,
+    "main_function": "Localización del carrusel",
+    "test_title": "Validar localización del carrusel en home o área temática",
+    "scope": "System",
+    "formatted_description": "h1. Breve descripción del test\n----\nValidar que el carrusel 'Volver a ver' se muestra correctamente en la home o en un área temática.\n----\nh1. Pre-requisitos\n----\n||ID||Pre-requisite||\n|1|Carrusel 'Volver a ver' configurado en la plataforma|\n|2|Acceso a la home y áreas temáticas de la aplicación|\n----\nh1. Datos de prueba\n----\n||ID||Test Data||\n|1|Localización configurada: Home|\n|2|Localización configurada: Área temática|\n----\nh1. Pasos y Resultados Esperados\n----\n||ID||Steps to Execute||Expected result||\n|1|Acceder a la home de la aplicación|El carrusel 'Volver a ver' se muestra en la home si está configurado para ello|\n|2|Acceder a un área temática de la aplicación|El carrusel 'Volver a ver' se muestra en el área temática si está configurado para ello|\n----\nh1. Notas y consideraciones especiales\n----\nEl carrusel no debe mostrarse en otras ubicaciones no configuradas."
+  },
+  {
+    "inventory_id": 3,
+    "main_function": "Inclusión de contenidos",
+    "test_title": "Validar inclusión de contenidos reproducidos por completo",
+    "scope": "System",
+    "formatted_description": "h1. Breve descripción del test\n----\nValidar que el carrusel 'Volver a ver' incluye únicamente contenidos reproducidos por completo.\n----\nh1. Pre-requisitos\n----\n||ID||Pre-requisite||\n|1|Carrusel 'Volver a ver' configurado en la plataforma|\n|2|Contenidos reproducidos por completo disponibles en el perfil|\n----\nh1. Datos de prueba\n----\n||ID||Test Data||\n|1|Contenido VoD reproducido por completo|\n|2|Contenido PPV reproducido por completo|\n|3|Contenido MOV reproducido por completo|\n|4|Contenido SER reproducido por completo|\n|5|Contenido EPI reproducido por completo|\n----\nh1. Pasos y Resultados Esperados\n----\n||ID||Steps to Execute||Expected result||\n|1|Acceder al carrusel 'Volver a ver'|El carrusel muestra únicamente contenidos reproducidos por completo|\n|2|Verificar los tipos de contenido mostrados|Se muestran contenidos VoD, PPV, MOV, SER y EPI reproducidos por completo|\n----\nh1. Notas y consideraciones especiales\n----\nLa inclusión de contenidos es responsabilidad de la plataforma."
+  }
+]
+JSON_END

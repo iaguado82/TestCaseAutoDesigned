@@ -38,18 +38,69 @@ def strip_html_tags(text):
     return text
 
 
+def dump_raw_response(text, us_key):
+    """
+    Guarda la respuesta cruda de la IA en un fichero para depuración.
+    """
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    filename = f"debug_raw_ai_response_{us_key}_{ts}.txt"
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"DEBUG: Respuesta cruda de la IA guardada en: {filename}")
+    except Exception as e:
+        print(f"DEBUG ERROR: No se pudo guardar la respuesta cruda: {e}")
+
+
+def extract_total_inventory(text):
+    """
+    Extrae N de la línea 'TOTAL_INVENTARIO: N' si existe.
+    """
+    m = re.search(r"TOTAL_INVENTARIO:\s*(\d+)", text)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
 def extract_analysis_and_json(text):
     """
     Separa el análisis técnico previo del bloque JSON.
-    Retorna (analisis_texto, lista_escenarios)
-    """
-    start_index = text.find('[')
-    end_index = text.rfind(']')
 
+    Nuevo método robusto:
+    - Busca JSON entre marcadores JSON_START y JSON_END.
+
+    Fallback:
+    - Si no hay marcadores, usa el método antiguo con corchetes.
+    """
     analysis = ""
     scenarios = []
 
-    if start_index != -1:
+    marker_start = "JSON_START"
+    marker_end = "JSON_END"
+
+    if marker_start in text and marker_end in text:
+        try:
+            before, after_start = text.split(marker_start, 1)
+            json_part, _ = after_start.split(marker_end, 1)
+
+            analysis = before.strip()
+            analysis = re.sub(r'```json|```', '', analysis).strip()
+
+            json_str = json_part.strip()
+            scenarios = json.loads(json_str)
+            return analysis, scenarios
+        except Exception as e:
+            print(f"DEBUG: Error parseando JSON entre marcadores: {e}")
+            return analysis, []
+
+    # Fallback antiguo
+    start_index = text.find('[')
+    end_index = text.rfind(']')
+
+    if start_index != -1 and end_index != -1 and end_index > start_index:
         analysis = text[:start_index].strip()
         analysis = re.sub(r'```json|```', '', analysis).strip()
 
@@ -57,9 +108,137 @@ def extract_analysis_and_json(text):
         try:
             scenarios = json.loads(json_str)
         except Exception as e:
-            print(f"DEBUG: Error parseando JSON dentro del bloque: {e}")
+            print(f"DEBUG: Error parseando JSON dentro del bloque (fallback): {e}")
 
     return analysis, scenarios
+
+
+def validate_scenarios_coverage(raw_text, scenarios):
+    """
+    Valida coherencia:
+    - TOTAL_INVENTARIO: N existe y es int.
+    - len(scenarios) == N
+    - inventory_id existe en todos, es int, y cubre exactamente 1..N sin duplicados.
+    """
+    n = extract_total_inventory(raw_text)
+    if n is None:
+        return False, "No se encontró TOTAL_INVENTARIO: N en la respuesta."
+
+    if not isinstance(scenarios, list):
+        return False, "El JSON no es un array."
+
+    if len(scenarios) != n:
+        return False, f"Mismatch: TOTAL_INVENTARIO={n} pero escenarios={len(scenarios)}."
+
+    ids = []
+    for i, sc in enumerate(scenarios):
+        if not isinstance(sc, dict):
+            return False, f"Escenario en posición {i} no es un objeto."
+        if "inventory_id" not in sc:
+            return False, f"Falta inventory_id en escenario en posición {i}."
+        try:
+            ids.append(int(sc["inventory_id"]))
+        except Exception:
+            return False, f"inventory_id no es int en escenario en posición {i}."
+
+        # Campos mínimos esperados
+        for req in ["main_function", "test_title", "scope", "formatted_description"]:
+            if req not in sc:
+                return False, f"Falta '{req}' en escenario con inventory_id={sc.get('inventory_id')}."
+
+    ids_sorted = sorted(ids)
+    expected = list(range(1, n + 1))
+    if ids_sorted != expected:
+        return False, f"inventory_id no cubre 1..{n} exactamente. Recibidos: {ids_sorted}"
+
+    return True, "OK"
+
+
+def missing_inventory_ids(raw_text, scenarios):
+    """
+    Devuelve (N, missing_ids) donde missing_ids son los inventory_id faltantes para cubrir 1..N.
+    Si no existe TOTAL_INVENTARIO devuelve (None, None).
+    """
+    n = extract_total_inventory(raw_text)
+    if n is None:
+        return None, None
+
+    have = set()
+    if isinstance(scenarios, list):
+        for sc in scenarios:
+            if isinstance(sc, dict) and "inventory_id" in sc:
+                try:
+                    have.add(int(sc.get("inventory_id")))
+                except Exception:
+                    pass
+
+    expected = set(range(1, n + 1))
+    missing = sorted(list(expected - have))
+    return n, missing
+
+
+def merge_scenarios(existing, new_items):
+    """
+    Merge por inventory_id. Si hay conflicto, el nuevo pisa el existente.
+    Devuelve lista ordenada por inventory_id.
+    """
+    by_id = {}
+
+    if isinstance(existing, list):
+        for sc in existing:
+            if isinstance(sc, dict) and "inventory_id" in sc:
+                try:
+                    by_id[int(sc["inventory_id"])] = sc
+                except Exception:
+                    pass
+
+    if isinstance(new_items, list):
+        for sc in new_items:
+            if isinstance(sc, dict) and "inventory_id" in sc:
+                try:
+                    by_id[int(sc["inventory_id"])] = sc
+                except Exception:
+                    pass
+
+    merged = [by_id[k] for k in sorted(by_id.keys())]
+    return merged
+
+
+def build_repair_prompt(us_key, total_n, missing_ids, original_prompt):
+    """
+    Prompt de reparación: pide SOLO los inventory_id faltantes, JSON-only entre marcadores.
+    """
+    missing_str = ", ".join(str(x) for x in missing_ids)
+    return f"""
+FALLO DE COBERTURA DETECTADO.
+
+Contexto:
+- Ticket principal: {us_key}
+- TOTAL_INVENTARIO esperado: {total_n}
+- inventory_id faltantes: {missing_str}
+
+INSTRUCCIONES (OBLIGATORIAS):
+- NO devuelvas Inventario Técnico.
+- Devuelve ÚNICAMENTE el JSON entre marcadores, exactamente así:
+  JSON_START
+  [
+    ...objetos...
+  ]
+  JSON_END
+- El JSON debe contener EXACTAMENTE {len(missing_ids)} objetos.
+- Cada objeto debe tener un inventory_id que esté en la lista de faltantes (solo esos, sin extras).
+- Mantén el mismo schema: inventory_id, main_function, test_title, scope, formatted_description.
+- Todo en español (main_function, test_title, formatted_description).
+
+RECUERDA LAS REGLAS DE formatted_description:
+- Estructura fija con tablas.
+- NO incluyas sección 'Referencias (externas a JIRA)'.
+- NO pegues enlaces ni tickets dentro de formatted_description.
+- Tabla de pasos: cabecera '||', filas con SOLO '|', 3 columnas exactas.
+
+Tarea original (para conservar contexto):
+{original_prompt}
+""".strip()
 
 
 # --- 1. CONFIGURACIÓN DE ENTORNO ---
@@ -225,7 +404,7 @@ def get_confluence_content(url):
 
 
 def ask_copilot(prompt):
-    """Consulta a la IA (GitHub Models) con mandato de inventario y masividad."""
+    """Consulta a la IA (GitHub Models) con contrato estricto + marcadores robustos."""
     token = clean_token(GITHUB_TOKEN)
     if not token:
         print("ERROR: El token de GitHub está vacío.")
@@ -238,75 +417,84 @@ def ask_copilot(prompt):
         "Accept": "application/json"
     }
 
+    # IMPORTANTÍSIMO:
+    # - Marcadores JSON_START / JSON_END
+    # - Español obligatorio
+    # - formatted_description con estructura fija y SIN sección "Referencias (externas a JIRA)"
+    # - coverage exacta 1:1 con inventory_id 1..N
+
+    system_content = (
+        "Eres un QA Senior experto.\n"
+        "RESPONDE SIEMPRE EN ESPAÑOL (títulos, descripciones, pasos, notas).\n"
+        "\n"
+        "CONTRATO DE SALIDA (OBLIGATORIO):\n"
+        "A) Devuelve SIEMPRE dos secciones en este orden:\n"
+        "   1) Inventario Técnico (texto).\n"
+        "   2) JSON entre marcadores.\n"
+        "B) En el Inventario Técnico NO uses corchetes '[' o ']' en ningún caso.\n"
+        "C) Inventario Técnico debe ser lista numerada simple 1..N (sin subniveles).\n"
+        "D) Al final del Inventario añade una línea literal exacta: TOTAL_INVENTARIO: N\n"
+        "E) Después del inventario escribe en una línea exacta: JSON_START\n"
+        "F) En la siguiente línea empieza el Array JSON (primer carácter '['). Sin markdown.\n"
+        "G) Después del JSON escribe en una línea exacta: JSON_END\n"
+        "\n"
+        "REGLAS DE COBERTURA (OBLIGATORIAS):\n"
+        "- El Array JSON debe contener EXACTAMENTE N escenarios.\n"
+        "- Cada escenario cubre EXACTAMENTE 1 ítem del inventario.\n"
+        "- Cada escenario incluye inventory_id con el número del ítem cubierto (1..N).\n"
+        "- Debe existir 1 y solo 1 escenario por cada inventory_id del 1 al N.\n"
+        "- No escribas NADA entre JSON_START y el '[' ni entre el ']' y JSON_END.\n"
+        "\n"
+        "SCHEMA JSON OBLIGATORIO:\n"
+        "[\n"
+        "  {\n"
+        "    \"inventory_id\": 1,\n"
+        "    \"main_function\": \"string\",\n"
+        "    \"test_title\": \"string\",\n"
+        "    \"scope\": \"System|E2E\",\n"
+        "    \"formatted_description\": \"string\"\n"
+        "  }\n"
+        "]\n"
+        "\n"
+        "FORMATO OBLIGATORIO de formatted_description (Jira Wiki Markup en español):\n"
+        "h1. Breve descripción del test\n"
+        "----\n"
+        "h1. Pre-requisitos\n"
+        "----\n"
+        "||ID||Pre-requisite||\n"
+        "(FILAS: usa SOLO '|' en cada fila, ej: |1|texto|)\n"
+        "h1. Datos de prueba\n"
+        "----\n"
+        "||ID||Test Data||\n"
+        "(FILAS: usa SOLO '|' en cada fila, ej: |1|texto|)\n"
+        "h1. Pasos y Resultados Esperados\n"
+        "----\n"
+        "||ID||Steps to Execute||Expected result||\n"
+        "IMPORTANTE TABLA PASOS:\n"
+        "- La cabecera usa '||'.\n"
+        "- Las filas usan SOLO '|' (NUNCA '||' dentro de una fila).\n"
+        "- EXACTAMENTE 3 columnas por fila: |ID|Steps to Execute|Expected result|\n"
+        "h1. Notas y consideraciones especiales\n"
+        "----\n"
+        "IMPORTANTE:\n"
+        "- NO incluyas la sección 'Referencias (externas a JIRA)'.\n"
+        "- NO pegues enlaces ni tickets en formatted_description.\n"
+        "- Mantén cada formatted_description por debajo de ~1200 caracteres sin romper tablas.\n"
+        "\n"
+        "VALIDACIÓN INTERNA ANTES DE RESPONDER:\n"
+        "- Asegura TOTAL_INVENTARIO: N correcto.\n"
+        "- Asegura JSON con EXACTAMENTE N escenarios.\n"
+        "- Asegura inventory_id 1..N sin huecos ni duplicados.\n"
+        "- Asegura que cada objeto contiene inventory_id, main_function, test_title, scope, formatted_description.\n"
+    )
+
     payload = {
         "model": "gpt-4o",
         "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "Eres un QA Senior experto. Tu objetivo es la COBERTURA TOTAL (100%) con salidas ESTRICTAS.\n"
-                    "CONTRATO DE SALIDA (OBLIGATORIO):\n"
-                    "A) Devuelve SIEMPRE dos secciones en este orden:\n"
-                    "   1) 'Inventario Técnico' en texto.\n"
-                    "   2) INMEDIATAMENTE después, un ÚNICO Array JSON válido (sin markdown, sin comentarios, sin texto extra).\n"
-                    "B) En cuanto empieces el JSON con '[', NO escribas nada fuera de JSON hasta cerrar con ']'.\n"
-                    "C) El JSON debe ser parseable por json.loads. Prohibidos: trailing commas, comillas mal cerradas, bloques ```.\n"
-                    "D) Cada escenario debe ser atómico (no agrupes varios inventarios en un mismo escenario).\n"
-                    "E) En el Inventario Técnico NO uses corchetes '[' o ']' en ningún caso.\n"
-                    "\n"
-                    "REGLAS DE COBERTURA (OBLIGATORIAS):\n"
-                    "- El Inventario Técnico debe ser una lista numerada simple 1..N (sin subniveles).\n"
-                    "- Al final del Inventario añade una línea literal: TOTAL_INVENTARIO: N\n"
-                    "- El Array JSON debe contener EXACTAMENTE N escenarios (ni más ni menos).\n"
-                    "- Cada escenario debe cubrir EXACTAMENTE 1 ítem del inventario.\n"
-                    "- Cada escenario debe incluir un campo 'inventory_id' con el número del ítem cubierto (1..N).\n"
-                    "- Debe existir 1 y solo 1 escenario por cada inventory_id del 1 al N.\n"
-                    "\n"
-                    "SCHEMA JSON OBLIGATORIO:\n"
-                    "[\n"
-                    "  {\n"
-                    "    \"inventory_id\": 1,\n"
-                    "    \"main_function\": \"string\",\n"
-                    "    \"test_title\": \"string\",\n"
-                    "    \"scope\": \"System|E2E\",\n"
-                    "    \"formatted_description\": \"string\"\n"
-                    "  }\n"
-                    "]\n"
-                    "\n"
-                    "FORMATO OBLIGATORIO DE formatted_description (Jira Wiki Markup en español):\n"
-                    "h1. Breve descripción del test\n"
-                    "----\n"
-                    "h1. Pre-requisitos\n"
-                    "----\n"
-                    "||ID||Pre-requisite||\n"
-                    "(FILAS: usa SOLO '|' en cada fila, ej: |1|texto|)\n"
-                    "h1. Datos de prueba\n"
-                    "----\n"
-                    "||ID||Test Data||\n"
-                    "(FILAS: usa SOLO '|' en cada fila, ej: |1|texto|)\n"
-                    "h1. Pasos y Resultados Esperados\n"
-                    "----\n"
-                    "||ID||Steps to Execute||Expected result||\n"
-                    "IMPORTANTE TABLA PASOS:\n"
-                    "- La cabecera usa '||'.\n"
-                    "- Las filas usan SOLO '|' (NUNCA '||' dentro de una fila).\n"
-                    "- EXACTAMENTE 3 columnas en cada fila: |ID|Steps to Execute|Expected result|\n"
-                    "h1. Notas y consideraciones especiales\n"
-                    "----\n"
-                    "h1. Referencias (externas a JIRA)\n"
-                    "----\n"
-                    "\n"
-                    "VALIDACIÓN INTERNA ANTES DE RESPONDER:\n"
-                    "- Asegura que el Inventario cumple 1..N y termina con TOTAL_INVENTARIO: N.\n"
-                    "- Asegura JSON con EXACTAMENTE N escenarios.\n"
-                    "- Asegura inventory_id 1..N sin huecos, sin duplicados.\n"
-                    "- Asegura que cada objeto contiene los 5 campos del schema.\n"
-                )
-            },
+            {"role": "system", "content": system_content},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.2,
-        "max_tokens": 6000
+        "temperature": 0.2
     }
 
     try:
@@ -346,7 +534,7 @@ def main():
     # --- EXTRACCIÓN DE LINKS (CONFLUENCE Y JIRA) ---
     extra_context = ""
 
-    # 1. Links de Confluence
+    # 1. Links de Confluence (Regex mejorada)
     conf_urls = re.findall(r'https?://confluence\.tid\.es/[^\s\]\)\|\,\>\"\' ]+', us_description_raw)
     if conf_urls:
         print(f"INFO: Detectados {len(conf_urls)} enlaces de Confluence.")
@@ -354,10 +542,10 @@ def main():
             content = get_confluence_content(url)
             if content:
                 print(f"INFO: Contexto extraído de Confluence: {url[:60]}...")
-                # Evitar corchetes para no romper el parser
+                # Evitar corchetes en etiquetas para no confundir al modelo/extractor
                 extra_context += f"\nDOCUMENTO CONFLUENCE {url}:\n{content}\n"
 
-    # 2. Links de Jira
+    # 2. Links de Jira (claves tipo PROJ-123)
     jira_keys_found = re.findall(r'([A-Z][A-Z0-9]+-\d+)', us_description_raw)
     if jira_keys_found:
         print(f"INFO: Detectadas {len(set(jira_keys_found))} referencias a Jira en la descripción.")
@@ -368,7 +556,6 @@ def main():
                 if issue_data:
                     desc_linked = strip_html_tags(issue_data['fields'].get('description', ''))
                     print(f"INFO: Contexto extraído de ticket vinculado: {key}")
-                    # Evitar corchetes para no romper el parser
                     extra_context += f"\nINFO TICKET VINCULADO {key}:\n{desc_linked[:3000]}\n"
 
     # --- BÚSQUEDA DE ÉPICA PADRE ---
@@ -382,7 +569,7 @@ def main():
             parent_epic_key = possible_parent if possible_parent else epic_key
             print(f"INFO: Jerarquía vinculación E2E -> {parent_epic_key}")
 
-    # --- DOCUMENTACIÓN DE ÉPICA ---
+    # --- DOCUMENTACIÓN DE ÉPICA (Confluence) ---
     parent_data = get_issue(parent_epic_key)
     doc_url = parent_data['fields'].get(ID_CAMPO_DOC_LINK) if parent_data else None
     contexto_epica = ""
@@ -406,56 +593,25 @@ Resumen: {us_summary}
 Descripción: {us_description}
 
 ### CONTEXTO ADICIONAL (ENLACES DE JIRA Y CONFLUENCE)
-{full_context[:6000]}
+{full_context[:12000]}
 
 ### TAREA
 Devuelve:
 - Primero el 'Inventario Técnico' (lista numerada simple 1..N, sin subniveles).
 - Al final del inventario añade: TOTAL_INVENTARIO: N
-- Luego, INMEDIATAMENTE, un Array JSON válido (sin markdown y sin texto extra).
-
-REGLAS DE COBERTURA (OBLIGATORIAS):
-- No uses '[' ni ']' en el Inventario Técnico.
-- El Array JSON debe comenzar en una nueva línea y el primer carácter debe ser '['.
-- No incluyas texto ni encabezados entre el Inventario y el '[' del JSON.
-- El Array JSON debe contener EXACTAMENTE N escenarios (ni más ni menos).
-- Cada escenario es atómico: 1 escenario = 1 ítem del inventario (no mezcles).
-- Cada escenario debe incluir inventory_id (1..N) y debe existir 1 y solo 1 escenario por cada inventory_id del 1 al N.
-
-REGLAS DE FORMATO:
-- El JSON debe incluir: inventory_id, main_function, test_title, scope, formatted_description.
-- Optimiza longitud: mantén cada 'formatted_description' por debajo de ~600 caracteres SIN eliminar pasos, tablas ni columnas. Prioriza pasos claros y concisos.
-- Máximo 2 filas en la tabla de Pasos y Resultados Esperados.
-- Para cada 'formatted_description', DEBES usar EXACTAMENTE esta estructura en ESPAÑOL, sin añadir ni eliminar secciones, tablas o columnas:
-
-h1. Breve descripción del test
-----
-h1. Pre-requisitos
-----
-||ID||Pre-requisite||
-(FILAS DE DATOS: usa SOLO '|' en cada fila. Ej: |1|texto|)
-h1. Datos de prueba
-----
-||ID||Test Data||
-(FILAS DE DATOS: usa SOLO '|' en cada fila. Ej: |1|texto|)
-h1. Pasos y Resultados Esperados
-----
-||ID||Steps to Execute||Expected result||
-IMPORTANTE:
-- Esta tabla debe tener EXACTAMENTE 3 columnas.
-- Cabecera con '||'. Filas con SOLO '|' (nunca '||' dentro de una fila).
-- Cada fila debe ser exactamente: |ID|Steps to Execute|Expected result|
-- Ejemplo correcto de fila: |1|Abrir la app|Se muestra el carrusel|
-h1. Notas y consideraciones especiales
-----
-h1. Referencias (externas a JIRA)
-----
+- Luego, JSON entre marcadores (JSON_START ... JSON_END) con EXACTAMENTE N escenarios.
+- 1 escenario por inventory_id 1..N.
+- Todo en español.
 """
 
     respuesta = ask_copilot(prompt)
     if not respuesta:
         return
 
+    # DEBUG: guardar respuesta cruda completa (clave para investigar cualquier desviación)
+    dump_raw_response(respuesta, us_key)
+
+    # Separar inventario y JSON
     analisis, scenarios = extract_analysis_and_json(respuesta)
 
     if analisis:
@@ -464,14 +620,26 @@ h1. Referencias (externas a JIRA)
         print(analisis)
         print("=" * 50 + "\n")
 
+    # Validación dura: si no cuadra, NO creamos tickets
+    ok, msg = validate_scenarios_coverage(respuesta, scenarios)
+    if not ok:
+        print(f"ERROR: Validación de cobertura fallida: {msg}")
+        print("INFO: No se crearán Test Cases en Jira para evitar cobertura parcial.")
+        return
+
     if scenarios:
         print(f"INFO: Procesando {len(scenarios)} escenarios generados...")
-        for sc in scenarios:
+
+        # Ordenar por inventory_id para que cree tickets de forma estable
+        scenarios_sorted = sorted(scenarios, key=lambda x: int(x.get("inventory_id", 0)))
+
+        for sc in scenarios_sorted:
             title = sc.get('test_title', 'Test')
             scope = sc.get('scope', 'System')
             is_e2e = scope.lower() in ["e2e", "end2end"]
             link_target = parent_epic_key if is_e2e else us_key
 
+            # Construcción del summary: [Categoría] Título
             summary_base = f"[{sc.get('main_function', 'QA')}] {title}"
             print(f"--- Creando: {summary_base} ({scope}) ---")
 

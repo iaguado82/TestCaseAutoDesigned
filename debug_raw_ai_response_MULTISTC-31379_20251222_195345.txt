@@ -1,0 +1,49 @@
+### Inventario Técnico
+1. Identificación del carrusel "Volver a ver" mediante CatalogType y CollectionLayoutStyle.
+2. Localización del carrusel en la home o en áreas temáticas.
+3. Inclusión de contenidos reproducidos completamente (VoD, PPV MOV, SER, EPI).
+4. Exclusión de series con nuevos episodios y episodios sueltos.
+5. Orden ascendente de contenidos en el carrusel.
+6. Gestión del parámetro "showAll" para mostrar el elemento "ver más".
+7. Exclusión de contenido adulto, salvo en áreas temáticas de adultos.
+8. Configuración del título del carrusel desde MiB.
+9. Representación del carrusel con imágenes BobPortrait y BobLandscape.
+10. Implementación de color predominante como fondo al enfocar un elemento.
+11. Navegación horizontal circular y memoria de foco en navegación vertical.
+12. Acción al presionar OK en un elemento del carrusel: reproducción directa.
+13. Comportamiento de botones adicionales (PLAY, INFO, OPC).
+14. Gestión de decoradores y content info en las imágenes del carrusel.
+15. Barra de progreso para contenidos VoD y Live.
+16. Gestión de fondo neutro, fondo de fallback y fondo basado en color predominante.
+17. Gestión de fondo para imágenes fuera del servicio y casos especiales.
+18. Inclusión de elementos especiales como "grabaciones disponibles" con tiempo restante.
+19. Configuración de content info para diferentes tipos de contenido (movies, series, episodios).
+20. Exclusión de contenidos no soportados o con fallback.
+
+TOTAL_INVENTARIO: 20
+
+JSON_START
+[
+  {
+    "inventory_id": 1,
+    "main_function": "Identificación del carrusel",
+    "test_title": "Validar identificación del carrusel 'Volver a ver'",
+    "scope": "System",
+    "formatted_description": "h1. Breve descripción del test\n----\nValidar que el carrusel 'Volver a ver' se identifica correctamente mediante CatalogType y CollectionLayoutStyle.\n\nh1. Pre-requisitos\n----\n||ID||Pre-requisite||\n|1|Acceso a la configuración del carrusel 'Volver a ver'.|\n|2|Acceso a la documentación de CatalogType y CollectionLayoutStyle.|\n\nh1. Datos de prueba\n----\n||ID||Test Data||\n|1|CatalogType: 'Watch Again'.|\n|2|CollectionLayoutStyle: '9 PortraitSmall'.|\n\nh1. Pasos y Resultados Esperados\n----\n||ID||Steps to Execute||Expected result||\n|1|Configurar el carrusel con CatalogType y CollectionLayoutStyle indicados.|El carrusel se identifica correctamente como 'Volver a ver'.|\n|2|Verificar la visualización del carrusel en la interfaz.|El carrusel aparece con el diseño esperado.|\n\nh1. Notas y consideraciones especiales\n----\nAsegurarse de que los valores de configuración sean consistentes con los definidos en la documentación."
+  },
+  {
+    "inventory_id": 2,
+    "main_function": "Localización del carrusel",
+    "test_title": "Validar localización del carrusel en home y áreas temáticas",
+    "scope": "System",
+    "formatted_description": "h1. Breve descripción del test\n----\nValidar que el carrusel 'Volver a ver' se muestra correctamente en la home y en áreas temáticas.\n\nh1. Pre-requisitos\n----\n||ID||Pre-requisite||\n|1|Acceso a la configuración de localización del carrusel.|\n|2|Acceso a la interfaz de usuario con home y áreas temáticas configuradas.|\n\nh1. Datos de prueba\n----\n||ID||Test Data||\n|1|Localización en home habilitada.|\n|2|Localización en áreas temáticas habilitada.|\n\nh1. Pasos y Resultados Esperados\n----\n||ID||Steps to Execute||Expected result||\n|1|Configurar el carrusel para mostrarse en la home.|El carrusel aparece en la home.|\n|2|Configurar el carrusel para mostrarse en un área temática.|El carrusel aparece en el área temática seleccionada.|\n\nh1. Notas y consideraciones especiales\n----\nVerificar que el carrusel no se muestra en ubicaciones no configuradas."
+  },
+  {
+    "inventory_id": 3,
+    "main_function": "Inclusión de contenidos",
+    "test_title": "Validar inclusión de contenidos reproducidos completamente",
+    "scope": "System",
+    "formatted_description": "h1. Breve descripción del test\n----\nValidar que el carrusel incluye únicamente contenidos reproducidos completamente (VoD, PPV MOV, SER, EPI).\n\nh1. Pre-requisitos\n----\n||ID||Pre-requisite||\n|1|Acceso a la base de datos de contenidos asociados al perfil.|\n|2|Configuración del carrusel 'Volver a ver'.|\n\nh1. Datos de prueba\n----\n||ID||Test Data||\n|1|Contenido VoD reproducido completamente.|\n|2|Contenido PPV MOV reproducido completamente.|\n|3|Contenido SER reproducido completamente.|\n|4|Contenido EPI reproducido completamente.|\n\nh1. Pasos y Resultados Esperados\n----\n||ID||Steps to Execute||Expected result||\n|1|Reproducir completamente un contenido VoD y verificar su inclusión en el carrusel.|El contenido VoD aparece en el carrusel.|\n|2|Reproducir completamente un contenido PPV MOV y verificar su inclusión en el carrusel.|El contenido PPV MOV aparece en el carrusel.|\n|3|Reproducir completamente una serie y verificar su inclusión en el carrusel.|La serie aparece en el carrusel.|\n|4|Reproducir completamente un episodio y verificar su inclusión en el carrusel.|El episodio aparece en el carrusel.|\n\nh1. Notas y consideraciones especiales\n----\nAsegurarse de que los contenidos no reproducidos completamente no se incluyan en el carrusel."
+  }
+]
+JSON_END
