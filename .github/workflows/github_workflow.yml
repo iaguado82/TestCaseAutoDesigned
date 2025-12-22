@@ -1,0 +1,38 @@
+name: QA Automation con GitHub Copilot
+
+# Este trigger permite que Jira "despierte" a GitHub mediante una petición API
+on:
+  repository_dispatch:
+    types: [jira_issue_created]
+
+jobs:
+  generate_tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Ejecutar Script de Generación de Tests
+        # Aquí mapeamos los secretos de GitHub a variables de entorno para el script
+        env:
+          JIRA_URL: "https://jira.tid.es/"
+          CONFLUENCE_URL: "https://confluence.tid.es/"
+          JIRA_USERNAME: "id02621"
+          # Estos secretos se deben configurar en Settings > Secrets del repo
+          JIRA_PERSONAL_TOKEN: ${{ secrets.JIRA_PERSONAL_TOKEN }}
+          CONFLUENCE_PERSONAL_TOKEN: ${{ secrets.CONFLUENCE_PERSONAL_TOKEN }}
+          # Token automático que GitHub proporciona para usar Copilot
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Capturamos el JSON enviado por Jira y lo pasamos al script
+          JIRA_PAYLOAD: ${{ toJson(github.event.client_payload) }}
+        run: python generate_tests_copilot.py

@@ -1,0 +1,6 @@
+# Ignorar tokens y configuraciones locales
+.env
+env_example.txt
+__pycache__/
+*.pyc
+.vscode/
