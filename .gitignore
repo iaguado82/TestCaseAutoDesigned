@@ -1,6 +1,11 @@
-# Ignorar tokens y configuraciones locales
-.env
+# Ignorar TODOS los archivos de credenciales
+*.env
+.env*
+environment.env
 env_example.txt
+
+# Ignorar archivos temporales de Python y editores
 __pycache__/
 *.pyc
 .vscode/
+.DS_Store
