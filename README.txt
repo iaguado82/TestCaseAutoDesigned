@@ -347,7 +347,7 @@ flowchart TD
     D --> CFG[qa_tc_gen/llm_context_config.py<br/>limits & flags]
     D --> PR1[qa_tc_gen/prompts.py<br/>system_contract_*()]
 
-    %% Scenario engine (LLM orchestration)
+    %% Scenario engine
     B --> E[qa_tc_gen/scenario_engine.py<br/>generate_scenarios_with_full_coverage()]
     E --> PR2[qa_tc_gen/prompts.py<br/>system_contract_*()]
     E --> LLM[qa_tc_gen/github_models_client.py<br/>call_github_models()]
@@ -357,7 +357,7 @@ flowchart TD
     %% Publishing
     B --> F[qa_tc_gen/publisher.py<br/>publish_test_cases()]
     F --> JIRA2[qa_tc_gen/jira_client.py<br/>create_test_case(), link_issues()]
-    F --> AUTO[qa_tc_gen/automation_quality.py<br/>compute_automation_label(), append_*]
+    F --> AUTO[qa_tc_gen/automation_quality.py<br/>compute_automation_label()]
     F --> POST[qa_tc_gen/utils_postprocess.py<br/>to_corporate_template()]
     F --> LOG[qa_tc_gen/utils_logging.py<br/>log_scenario_sources()]
     F --> UT3[qa_tc_gen/utils_text.py<br/>normalize_jira_wiki()]
@@ -365,6 +365,7 @@ flowchart TD
     %% Output
     F --> Z[Jira<br/>Test Cases created + links]
 
+```mermaid
 sequenceDiagram
     autonumber
 
@@ -372,47 +373,42 @@ sequenceDiagram
     participant GEN as generator.py<br/>run_main()
     participant CTX as context_builder.py
     participant BUD as llm_budget.py
-    participant LLM as scenario_engine.py
+    participant ENG as scenario_engine.py
     participant PUB as publisher.py
     participant JIRA as Jira / Confluence
-    participant MODEL as LLM Corporativo
+    participant LLM as LLM Corporativo
 
     CLI->>GEN: run_main(issue_key, target_project)
 
-    %% Context resolution
-    GEN->>CTX: build_truth_sources(issue)
-    CTX->>JIRA: get_issue(), get_dependency_issue_keys()
-    JIRA-->>CTX: US + dependencias
+    GEN->>CTX: build_truth_sources()
+    CTX->>JIRA: get_issue(), dependencies
+    JIRA-->>CTX: issues
 
     GEN->>CTX: resolve_anchor_epic()
-    CTX->>JIRA: get_epic_link_key(), get_parent_epic_key()
+    CTX->>JIRA: epic / parent epic
 
     GEN->>CTX: build_additional_context()
-    CTX->>JIRA: get_issue() refs
-    CTX->>JIRA: get_confluence_content()
+    CTX->>JIRA: referenced issues
+    CTX->>JIRA: confluence docs
 
     GEN->>CTX: build_epic_context()
-    CTX->>JIRA: get_doc_link() + confluence
+    CTX->>JIRA: epic documentation
 
-    %% Payload preparation
-    GEN->>CTX: build_truth_text()
-    GEN->>BUD: build_llm_payload(truth, context, confluence)
-    BUD-->>GEN: payload recortado + métricas
+    GEN->>BUD: build_llm_payload()
+    BUD-->>GEN: payload recortado
 
-    %% LLM generation
-    GEN->>LLM: generate_scenarios_with_full_coverage(payload)
-    LLM->>MODEL: call_github_models()<br/>inventario + escenarios
-    MODEL-->>LLM: respuesta inicial
+    GEN->>ENG: generate_scenarios_with_full_coverage()
+    ENG->>LLM: call_github_models()
+    LLM-->>ENG: inventario + escenarios
 
-    LLM->>MODEL: call_github_models()<br/>completado missing (si aplica)
-    MODEL-->>LLM: escenarios faltantes
+    ENG->>LLM: completion missing (si aplica)
+    LLM-->>ENG: escenarios faltantes
 
-    LLM-->>GEN: escenarios validados (100% cobertura)
+    ENG-->>GEN: escenarios validados
 
-    %% Publishing
-    GEN->>PUB: publish_test_cases(scenarios)
+    GEN->>PUB: publish_test_cases()
     PUB->>JIRA: create_test_case()
     PUB->>JIRA: link_issues()
 
-    PUB-->>GEN: resumen creación
+    PUB-->>GEN: resumen
     GEN-->>CLI: exit code
