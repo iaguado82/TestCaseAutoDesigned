@@ -1,4 +1,6 @@
+import os
 import re
+import time
 
 from .llm_context_config import (
     LLM_MAX_TOKENS,
@@ -10,7 +12,9 @@ from .llm_context_config import (
     LOG_CONTEXT_DECISIONS,
 )
 
-from .config import TARGET_PROJECT
+# Fallback (legacy) si no llega por CLI ni env
+from .config import TARGET_PROJECT as DEFAULT_TARGET_PROJECT
+
 from .utils_text import strip_html_tags, dump_raw_response
 from .utils_ai_parse import (
     extract_analysis_and_json,
@@ -23,7 +27,7 @@ from .utils_ai_parse import (
 from .automation_quality import (
     compute_automation_label,
     append_automation_block_to_description,
-    append_kpi_block_option_a,  # (mantengo import por compatibilidad; KPI está desactivado abajo)
+    append_kpi_block_option_a,  # compat; KPI está desactivado abajo
 )
 from .jira_client import (
     get_issue,
@@ -46,6 +50,18 @@ from .utils_postprocess import to_corporate_template
 
 
 # ---------------------------
+# Exit codes (fail-fast / CI-friendly)
+# ---------------------------
+EXIT_OK = 0
+EXIT_RATE_LIMIT_DAILY = 10
+EXIT_RATE_LIMIT_RETRIES_EXHAUSTED = 11
+EXIT_REQUEST_TOO_LARGE = 12
+EXIT_COVERAGE_VALIDATION_FAILED = 20
+EXIT_JIRA_OR_IO_ERROR = 30
+EXIT_UNKNOWN_ERROR = 99
+
+
+# ---------------------------
 # Presupuestos / límites (no LLM)
 # ---------------------------
 MAX_TRUTH_BLOCK_CHARS_PER_ISSUE = 8000
@@ -58,8 +74,12 @@ CONTEXT_REFERENCE_DEPTH = 1
 MAX_TRUTH_ISSUES = 10
 
 # Reserva defensiva para overhead de mensajes/roles/serialización + variación chars->tokens
-# (si el system prompt es grande, esta reserva evita el 413 por “casi”)
+# Si el system prompt es grande, esta reserva evita el 413 por “casi”
 SAFETY_OVERHEAD_TOKENS = 450
+
+# Fail-fast rate limit: si el backend pide esperar > umbral, aborta con código explícito.
+# (Por defecto 15 min; configurable por env)
+FAIL_FAST_RATE_LIMIT_SECONDS = int(os.getenv("FAIL_FAST_RATE_LIMIT_SECONDS", "900"))
 
 
 # ---------------------------
@@ -104,6 +124,21 @@ def _approx_tokens_from_chars(chars: int) -> int:
 def _log_context(msg: str):
     if LOG_CONTEXT_DECISIONS:
         print(f"INFO CONTEXT: {msg}", flush=True)
+
+
+def _resolve_target_project(cli_target_project: str | None = None) -> str:
+    """
+    Orden de precedencia:
+    1) CLI (--target-project)
+    2) ENV TARGET_PROJECT
+    3) DEFAULT_TARGET_PROJECT (config.py)
+    """
+    if cli_target_project and str(cli_target_project).strip():
+        return str(cli_target_project).strip()
+    env_tp = (os.getenv("TARGET_PROJECT", "") or "").strip()
+    if env_tp:
+        return env_tp
+    return (DEFAULT_TARGET_PROJECT or "").strip()
 
 
 def ask_inventory_and_initial_scenarios(prompt: str):
@@ -155,8 +190,8 @@ def _estimate_system_tokens_initial() -> int:
     Importante: el 413 te venía de no reservar estos tokens.
     """
     sys_txt = system_contract_no_tables_inventory_and_json() or ""
-    # +100 chars de margen por wrappers/variación
-    return _approx_tokens_from_chars(len(sys_txt) + 100)
+    # +200 chars margen por wrappers/variación de serialización
+    return _approx_tokens_from_chars(len(sys_txt) + 200)
 
 
 def build_llm_payload(truth_text: str, context_text: str, confluence_text: str) -> dict:
@@ -166,7 +201,7 @@ def build_llm_payload(truth_text: str, context_text: str, confluence_text: str) 
     - Si excede presupuesto REAL del modelo (restando system prompt + overhead):
       1) drop confluence (si flag)
       2) recorta context
-      3) recorta truth
+      3) recorta truth (último recurso)
     """
     # 1) Caps por bloque (chars)
     truth = _clip_text("truth", truth_text or "", MAX_TRUTH_CHARS)
@@ -179,8 +214,8 @@ def build_llm_payload(truth_text: str, context_text: str, confluence_text: str) 
     available_user_chars = int(available_user_tokens * CHARS_PER_TOKEN)
 
     def total_chars(t: str, c: str, cf: str) -> int:
-        # separadores + algo de overhead textual del prompt user
-        return len(t) + len(c) + len(cf) + 650
+        # separadores + overhead textual del prompt user
+        return len(t) + len(c) + len(cf) + 900  # margen mayor para “headers” del prompt
 
     def total_tokens(t: str, c: str, cf: str) -> int:
         return _approx_tokens_from_chars(total_chars(t, c, cf))
@@ -202,16 +237,18 @@ def build_llm_payload(truth_text: str, context_text: str, confluence_text: str) 
         tok = total_tokens(truth, context, confluence)
         _log_context(f"Drop CONFLUENCE por tamaño. Nuevo ~tokens={tok}.")
 
-    # 4) Si aún excede, hard clip con reparto (context primero)
+    # 4) Si aún excede, hard clip con reparto (context primero; truth se preserva al máximo)
     if tok > available_user_tokens:
         target_chars = int(available_user_chars * 0.92)  # margen adicional
         if target_chars <= 0:
+            # fallback ultra defensivo
             target_chars = int(LLM_MAX_TOKENS * CHARS_PER_TOKEN * 0.50)
 
-        # Reparto cuando vamos justos: 65% truth, 35% context
-        truth_budget = min(MAX_TRUTH_CHARS, int(target_chars * 0.65))
-        ctx_budget = min(MAX_CONTEXT_CHARS, int(target_chars * 0.35))
+        # Reparto cuando vamos justos: 70% truth, 30% context
+        truth_budget = min(MAX_TRUTH_CHARS, int(target_chars * 0.70))
+        ctx_budget = min(MAX_CONTEXT_CHARS, int(target_chars * 0.30))
 
+        # Si truth ya es menor, cedemos a context
         if len(truth) < truth_budget:
             extra = truth_budget - len(truth)
             ctx_budget = min(MAX_CONTEXT_CHARS, ctx_budget + extra)
@@ -235,17 +272,54 @@ def build_llm_payload(truth_text: str, context_text: str, confluence_text: str) 
     }
 
 
-def run_main(us_key: str):
+def _is_rate_limit_daily_error(text: str) -> bool:
+    if not text:
+        return False
+    # Mensaje típico: "Rate limit of 100 per 86400s exceeded ..."
+    t = text.lower()
+    return ("per 86400s" in t) or ("userbymodelbyday" in t) or ("per day" in t)
+
+
+def _extract_wait_seconds_from_rate_limit(text: str) -> int | None:
+    """
+    Extrae "Please wait XXXXX seconds" del error, si existe.
+    """
+    if not text:
+        return None
+    m = re.search(r"Please wait\s+(\d+)\s+seconds", text, re.IGNORECASE)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
+def run_main(us_key: str, target_project: str | None = None):
+    """
+    Entry point.
+    - us_key: Issue key de entrada (US).
+    - target_project: Proyecto Jira donde se crean los Test Cases (si None, se resuelve por env/config).
+
+    Devuelve exit code (int) para automatización.
+    """
     print("--- DIAGNÓSTICO DE INICIO ---", flush=True)
 
     if not us_key:
         print("ERROR: MANUAL_ISSUE_KEY no detectada.", flush=True)
-        return
+        return EXIT_JIRA_OR_IO_ERROR
+
+    target_project_key = _resolve_target_project(target_project)
+    if not target_project_key:
+        print("ERROR: TARGET_PROJECT no definido (ni --target-project ni env ni config).", flush=True)
+        return EXIT_JIRA_OR_IO_ERROR
 
     print(f"--- Procesando: {us_key} ---", flush=True)
+    print(f"INFO: Target project para Test Cases: {target_project_key}", flush=True)
+
     us_data = get_issue(us_key)
     if not us_data:
-        return
+        return EXIT_JIRA_OR_IO_ERROR
 
     us_summary = us_data["fields"].get("summary", "")
     us_description_raw = us_data["fields"].get("description", "") or ""
@@ -476,7 +550,13 @@ Devuelve:
 
     respuesta = ask_inventory_and_initial_scenarios(base_user_prompt)
     if not respuesta:
-        return
+        # Fail-fast: el client ya imprimió el error. Aquí intentamos inferir si fue cuota diaria.
+        # Como call_github_models no propaga estructura, dependemos del log/artefacto guardado.
+        # Señal adicional (opcional): si existe env con último error (si lo implementas).
+        print("ERROR: No se obtuvo respuesta de IA en llamada inicial.", flush=True)
+        return EXIT_RATE_LIMIT_RETRIES_EXHAUSTED
+
+    # Guardar siempre la respuesta cruda (auditoría)
     dump_raw_response(respuesta, us_key, suffix="initial")
 
     analisis, scenarios = extract_analysis_and_json(respuesta)
@@ -490,7 +570,7 @@ Devuelve:
 
     if n_total is None:
         print("ERROR: No se detectó TOTAL_INVENTARIO en la respuesta inicial. Abortando.", flush=True)
-        return
+        return EXIT_UNKNOWN_ERROR
 
     if not isinstance(scenarios, list):
         scenarios = []
@@ -528,6 +608,10 @@ Devuelve:
         )
 
         batch = missing[:BATCH_SIZE]
+
+        # Fail-fast opcional: si ya sabemos que estamos en “por día”, abortamos rápido.
+        # En este punto no tenemos el body del 429; el client imprime la señal.
+        # Mantener aquí solo el “guardrail” por tiempo total si tú quieres.
         resp_missing = ask_missing_scenarios(inventory_text, compact_completion_context, batch)
         if not resp_missing:
             print("WARN: No hubo respuesta en completado. Reintentando...", flush=True)
@@ -561,7 +645,7 @@ Devuelve:
         print(f"ERROR: Validación de cobertura fallida: {msg}", flush=True)
         print(f"INFO: Recibidos escenarios={len(scenarios)} de TOTAL_INVENTARIO={n_total}.", flush=True)
         print("INFO: No se crearán Test Cases en Jira para evitar cobertura parcial.", flush=True)
-        return
+        return EXIT_COVERAGE_VALIDATION_FAILED
 
     # 10) Crear TCs
     print(f"INFO: Cobertura OK. Procesando {len(scenarios)} escenarios generados...", flush=True)
@@ -597,7 +681,7 @@ Devuelve:
         log_scenario_sources(sc, context_provenance)
 
         tc_key = create_test_case(
-            TARGET_PROJECT,
+            target_project_key,  # <-- CAMBIO: ahora viene por CLI/env/config
             f"{summary_base} - Manual",
             final_desc,
             link_target_primary,
@@ -611,3 +695,4 @@ Devuelve:
                 link_issues(us_key, tc_key)
 
     print(f"--- Proceso finalizado para {us_key} ---", flush=True)
+    return EXIT_OK
