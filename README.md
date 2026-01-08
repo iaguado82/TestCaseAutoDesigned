@@ -334,5 +334,5 @@ Código estructurado, trazable y revisable para QA Senior y auditorías internas
 
 ## Diagramas de Arquitectura
 
-- [Diagrama de dependencias entre módulos (Mermaid)](docs/architecture-flow.mmd)
-- [Diagrama de secuencia – orden temporal de ejecución (Mermaid)](docs/architecture-sequence.mmd)
+- [Diagrama de dependencias entre módulos (Mermaid)](docs/flow.mmd)
+- [Diagrama de secuencia – orden temporal de ejecución (Mermaid)](docs/sequence.mmd)
