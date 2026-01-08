@@ -334,43 +334,43 @@ Código estructurado, trazable y revisable para QA Senior y auditorías internas
 
 ```mermaid
 flowchart TD
-    A[run.py<br/>CLI entrypoint] --> B[qa_tc_gen/generator.py<br/>run_main()]
+    A["run.py\nCLI entrypoint"] --> B["qa_tc_gen/generator.py\nrun_main()"]
 
     %% Context building
-    B --> C[qa_tc_gen/context_builder.py<br/>Truth + Supporting Context]
-    C --> JIRA[qa_tc_gen/jira_client.py<br/>get_issue(), links, deps]
-    C --> CONF[qa_tc_gen/confluence_client.py<br/>get_confluence_content()]
-    C --> UT1[qa_tc_gen/utils_text.py<br/>strip_html_tags()]
+    B --> C["qa_tc_gen/context_builder.py\nTruth + Supporting Context"]
+    C --> JIRA["qa_tc_gen/jira_client.py\nget_issue(), links, deps"]
+    C --> CONF["qa_tc_gen/confluence_client.py\nget_confluence_content()"]
+    C --> UT1["qa_tc_gen/utils_text.py\nstrip_html_tags()"]
 
     %% Budgeting
-    B --> D[qa_tc_gen/llm_budget.py<br/>build_llm_payload()]
-    D --> CFG[qa_tc_gen/llm_context_config.py<br/>limits & flags]
-    D --> PR1[qa_tc_gen/prompts.py<br/>system_contract_*()]
+    B --> D["qa_tc_gen/llm_budget.py\nbuild_llm_payload()"]
+    D --> CFG["qa_tc_gen/llm_context_config.py\nlimits & flags"]
+    D --> PR1["qa_tc_gen/prompts.py\nsystem_contract_*()"]
 
     %% Scenario engine
-    B --> E[qa_tc_gen/scenario_engine.py<br/>generate_scenarios_with_full_coverage()]
-    E --> PR2[qa_tc_gen/prompts.py<br/>system_contract_*()]
-    E --> LLM[qa_tc_gen/github_models_client.py<br/>call_github_models()]
-    E --> PARSE[qa_tc_gen/utils_ai_parse.py<br/>extract_* / validate_*]
-    E --> UT2[qa_tc_gen/utils_text.py<br/>dump_raw_response()]
+    B --> E["qa_tc_gen/scenario_engine.py\ngenerate_scenarios_with_full_coverage()"]
+    E --> PR2["qa_tc_gen/prompts.py\nsystem_contract_*()"]
+    E --> LLM["qa_tc_gen/github_models_client.py\ncall_github_models()"]
+    E --> PARSE["qa_tc_gen/utils_ai_parse.py\nextract_* / validate_*"]
+    E --> UT2["qa_tc_gen/utils_text.py\ndump_raw_response()"]
 
     %% Publishing
-    B --> F[qa_tc_gen/publisher.py<br/>publish_test_cases()]
-    F --> JIRA2[qa_tc_gen/jira_client.py<br/>create_test_case(), link_issues()]
-    F --> AUTO[qa_tc_gen/automation_quality.py<br/>compute_automation_label()]
-    F --> POST[qa_tc_gen/utils_postprocess.py<br/>to_corporate_template()]
-    F --> LOG[qa_tc_gen/utils_logging.py<br/>log_scenario_sources()]
-    F --> UT3[qa_tc_gen/utils_text.py<br/>normalize_jira_wiki()]
+    B --> F["qa_tc_gen/publisher.py\npublish_test_cases()"]
+    F --> JIRA2["qa_tc_gen/jira_client.py\ncreate_test_case(), link_issues()"]
+    F --> AUTO["qa_tc_gen/automation_quality.py\ncompute_automation_label()"]
+    F --> POST["qa_tc_gen/utils_postprocess.py\nto_corporate_template()"]
+    F --> LOG["qa_tc_gen/utils_logging.py\nlog_scenario_sources()"]
+    F --> UT3["qa_tc_gen/utils_text.py\nnormalize_jira_wiki()"]
 
     %% Output
-    F --> Z[Jira<br/>Test Cases created + links]
+    F --> Z["Jira\nTest Cases created + links"]
 
 ```mermaid
 sequenceDiagram
     autonumber
 
-    participant CLI as run.py<br/>CLI
-    participant GEN as generator.py<br/>run_main()
+    participant CLI as run.py
+    participant GEN as generator.py
     participant CTX as context_builder.py
     participant BUD as llm_budget.py
     participant ENG as scenario_engine.py
