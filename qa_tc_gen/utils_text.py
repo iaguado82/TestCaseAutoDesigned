@@ -37,3 +37,15 @@ def dump_raw_response(text, us_key, suffix=""):
         print(f"DEBUG: Respuesta cruda de la IA guardada en: {filename}", flush=True)
     except Exception as e:
         print(f"DEBUG ERROR: No se pudo guardar la respuesta cruda: {e}", flush=True)
+
+def normalize_jira_wiki(desc: str) -> str:
+    if not desc:
+        return ""
+    s = desc.replace("\r\n", "\n").replace("\r", "\n").strip()
+    s = re.sub(r"(?<!\n)(h1\.\s+)", r"\n\1", s)
+    s = re.sub(r"\s*----\s*", r"\n----\n", s)
+    s = re.sub(r"(?<!\n)\s(\*\s+)", r"\n\1", s)
+    s = re.sub(r"(?<!\n)\s(#\s+Acción:)", r"\n\1", s)
+    s = re.sub(r"(?<!\n)\nh1\.", r"\n\nh1.", s)
+    s = re.sub(r"\n{3,}", "\n\n", s).strip()
+    return s.lstrip("\n")

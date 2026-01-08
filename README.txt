@@ -2,15 +2,27 @@ A-Intelligence Workflow
 
 Automatización avanzada de Test Cases con IA (Telefónica I+D)
 
-Este proyecto implementa un flujo automatizado, seguro y auditable para el diseño de Test Cases a partir de User Stories en entornos Telefónica (TID), integrando Jira, Confluence y modelos LLM corporativos (GitHub Copilot / GitHub Models).
+Este proyecto implementa un flujo automatizado, determinista, seguro y auditable para el diseño de Test Cases a partir de User Stories en entornos Telefónica (TID), integrando Jira, Confluence y modelos LLM corporativos (GitHub Copilot / GitHub Models).
 
-El sistema transforma requisitos funcionales dispersos (User Stories, dependencias, épicas y documentación técnica) en Test Cases manuales estructurados, con clasificación de automatización, KPIs de rendimiento y vinculación jerárquica completa, sin intervención humana en el diseño.
+El sistema transforma requisitos funcionales dispersos (User Stories, dependencias, épicas y documentación técnica) en Test Cases manuales estructurados, con:
 
-Arquitectura del Sistema
+clasificación System / End-to-End,
 
-El sistema sigue una arquitectura orientada a eventos y determinista, con control explícito del contexto y del presupuesto de tokens, diseñada para operar en entornos corporativos con restricciones de seguridad y trazabilidad.
+evaluación de candidaturas de automatización,
 
-Flujo conceptual:
+generación de código de automatización cuando aplica,
+
+vinculación jerárquica completa en Jira,
+
+sin intervención humana en el diseño de las pruebas, y con control explícito de contexto, tokens y estabilidad.
+
+1. Arquitectura del Sistema
+
+El sistema sigue una arquitectura modular y orientada a responsabilidades, diseñada para operar en entornos corporativos con restricciones de seguridad, trazabilidad y control de costes.
+
+El flujo es determinista: a igualdad de entrada y fuentes, el resultado es reproducible.
+
+Flujo conceptual
 
 Una User Story se selecciona como punto de entrada.
 
@@ -24,18 +36,18 @@ Se valida cobertura completa antes de crear cualquier Test Case.
 
 Se publican los Test Cases en Jira con enlaces jerárquicos correctos.
 
-Modelo Conceptual Clave
+2. Modelo Conceptual Clave
 2.1 Separación estricta de responsabilidades
 
-El sistema distingue explícitamente entre dos tipos de información:
+El sistema distingue explícitamente entre qué información define requisitos y qué información solo aporta contexto, evitando mezclas implícitas que degraden la calidad de las pruebas.
 
 A) Fuente de Verdad (Truth Sources)
 
 Información prioritaria y obligatoria para el diseño de pruebas:
 
-La User Story ejecutada (descripción completa, siempre procesada al 100%).
+La User Story ejecutada, procesada siempre al 100%.
 
-Issues enlazados mediante el tipo de relación “is a dependency for” (configurable), cuando el requisito funcional real reside fuera de la US original.
+Issues enlazados mediante relaciones de dependencia funcional (configurables por entorno), cuando el requisito real reside fuera de la US original.
 
 Estas fuentes:
 
@@ -63,9 +75,9 @@ No define requisitos funcionales.
 
 Está limitado por presupuesto.
 
-Se degrada de forma controlada para garantizar estabilidad del sistema.
+Se degrada de forma controlada para garantizar estabilidad.
 
-Resolución de Jerarquía y Enlaces
+3. Resolución de Jerarquía y Enlaces
 3.1 Cadena funcional soportada
 
 El sistema soporta múltiples topologías de proyecto:
@@ -77,7 +89,6 @@ Proyectos donde la US actúa como contenedor y la definición reside en otra US 
 Proyectos con distintos nombres de relaciones Jira (configurables por entorno).
 
 3.2 Reglas de enlace de Test Cases
-
 Test Cases System
 
 Se vinculan únicamente a la User Story ejecutada.
@@ -88,13 +99,13 @@ Se vinculan a la épica anchor (por ejemplo JEFE-XXX).
 
 Y adicionalmente a la User Story.
 
-Esto garantiza trazabilidad completa:
+Esto garantiza:
 
 Visión E2E a nivel programa o iniciativa.
 
 Visión funcional a nivel de User Story.
 
-Flujo de Generación de Pruebas
+4. Flujo de Generación de Pruebas
 Paso 1 – Recolección de Verdad
 
 Se procesa íntegramente la descripción de la User Story.
@@ -109,7 +120,7 @@ Se extraen referencias a otros issues Jira.
 
 Se procesan enlaces Confluence.
 
-Se controla:
+Se controla explícitamente:
 
 profundidad,
 
@@ -119,7 +130,7 @@ tamaño máximo por bloque.
 
 Paso 3 – Generación bajo Contrato
 
-El modelo LLM opera bajo un contrato estricto que exige:
+El modelo LLM opera bajo un contrato estricto, que exige:
 
 Inventario técnico numerado de 1 a N.
 
@@ -129,21 +140,21 @@ Correspondencia exacta 1:1 entre inventario y escenarios.
 
 Clasificación System / E2E basada en heurística UI/UX.
 
-Inclusión obligatoria de los campos:
+Campos obligatorios por escenario:
 
 automation_candidate
 
 automation_type
 
-automation_code (solo si procede)
+automation_code (cuando aplica)
 
 Paso 4 – Validación y Completado Iterativo
 
-Tras la generación inicial, el sistema valida la cobertura real:
+Tras la generación inicial:
 
 Se detectan los inventory_id no cubiertos.
 
-Se lanzan iteraciones de completado dirigidas, solicitando únicamente los IDs faltantes.
+Se lanzan iteraciones de completado dirigidas, solicitando solo los IDs faltantes.
 
 Cada iteración:
 
@@ -153,23 +164,23 @@ Usa un contexto compacto y controlado.
 
 Devuelve exclusivamente los escenarios solicitados.
 
-Este proceso se repite hasta:
+El proceso se repite hasta:
 
 Alcanzar cobertura completa, o
 
 Superar el número máximo de intentos permitidos.
 
-⚠️ Si no se alcanza cobertura total, no se crea ningún Test Case en Jira, evitando publicaciones parciales o inconsistentes.
+⚠️ Si no se alcanza cobertura total, no se crea ningún Test Case en Jira.
 
 Calidad de los autocompletados
 
-El uso de contexto resumido en esta fase no degrada la calidad de los tests, ya que:
+No se degrada la calidad porque:
 
-El “qué probar” ya está definido por el inventario.
+El qué probar ya está definido por el inventario.
 
-El modelo solo materializa escenarios previamente especificados.
+El modelo solo materializa escenarios ya especificados.
 
-No se le delega descubrimiento de requisitos en esta fase.
+No se le delega descubrimiento de requisitos.
 
 Paso 5 – Post-procesado previo a Jira
 
@@ -179,17 +190,17 @@ Normalización de Jira Wiki Markup.
 
 Inserción automática de:
 
-KPIs de rendimiento cuando aplica.
+bloque informativo de automatización,
 
-Bloque informativo de automatización.
+KPIs cuando aplica.
 
-Conversión opcional a tablas corporativas mediante post-proceso local.
+Conversión opcional a plantillas corporativas mediante post-proceso local.
 
-Sin consumo adicional de tokens LLM.
+Todo ello sin consumo adicional de tokens LLM.
 
-Control de Tokens y Estabilidad
+5. Control de Tokens y Estabilidad
 
-El sistema incorpora defensas explícitas contra errores habituales en LLMs como:
+El sistema incorpora defensas explícitas frente a errores habituales en LLMs:
 
 413 Request Too Large
 
@@ -209,13 +220,9 @@ Estimación conservadora de tokens basada en tamaño de texto (chars → tokens)
 
 Gestión reactiva
 
-Dado que los límites reales del modelo no son predecibles con exactitud:
+El propio error del modelo se utiliza como señal de ajuste.
 
-El propio error del modelo se utiliza como señal final de ajuste.
-
-El sistema reacciona degradando el contexto de forma jerárquica.
-
-Orden de degradación
+Orden de degradación:
 
 Documentación Confluence.
 
@@ -223,48 +230,97 @@ Contexto ampliado.
 
 Recorte controlado de la truth (hard-clip).
 
-Hard-clip (última defensa)
+Hard-clip
 
 Nunca elimina la fuente de verdad.
 
-Recorta manteniendo cabecera y cola del texto.
+Mantiene cabecera y cola del texto.
 
-Señaliza explícitamente el recorte en el contenido enviado al modelo.
+Señaliza explícitamente el recorte.
 
-Este enfoque prioriza siempre la coherencia funcional frente a la exhaustividad contextual.
+6. Seguridad y Privacidad
+6.1 Soberanía de Datos
 
-Seguridad y Privacidad
-5.1 Soberanía de Datos
+Los prompts no se usan para entrenar modelos globales.
 
-Los prompts no se utilizan para entrenar modelos globales.
+Datos procesados solo en memoria.
 
-Los datos se procesan únicamente en memoria.
+Operación bajo contratos Enterprise aprobados.
 
-Operación bajo contratos Enterprise con proveedores aprobados.
-
-5.2 Gestión de Credenciales
+6.2 Gestión de Credenciales
 
 Uso exclusivo de variables de entorno.
 
 Tokens con principio de mínimo privilegio.
 
-Ningún secreto se versiona en el código.
+Ningún secreto versionado en el código.
 
-Todas las acciones quedan trazadas en Jira bajo el usuario asociado al token.
+Todas las acciones quedan trazadas en Jira.
 
-5.3 Seguridad en tránsito y ejecución
+6.3 Seguridad en tránsito y ejecución
 
-Comunicaciones cifradas mediante HTTPS (TLS 1.2 o superior).
+HTTPS (TLS ≥ 1.2).
 
 Sin persistencia local de datos sensibles.
 
-Compatible con ejecución local controlada y runners efímeros corporativos.
+Compatible con ejecución local controlada y runners efímeros.
 
-Configuración y Uso
+7. Configuración y Uso
+7.1 Variables de entorno requeridas
+Jira
+JIRA_URL=https://jira.tid.es
+JIRA_USERNAME=<usuario_jira>
+JIRA_PERSONAL_TOKEN=<token_personal_jira>
 
-(sin cambios respecto al README original)
+Confluence
+CONFLUENCE_URL=https://confluence.tid.es
+CONFLUENCE_PERSONAL_TOKEN=<token_personal_confluence>
 
-Conformidad Técnica (MCP / Entorno Corporativo)
+Proyecto destino de Test Cases
+TARGET_PROJECT=MULTISTC
+
+
+TARGET_PROJECT se resuelve por orden:
+
+Parámetro CLI
+
+Variable de entorno
+
+Fallback en config.py
+
+Modelos LLM corporativos
+GITHUB_TOKEN=<token_github_models>
+GITHUB_MODEL=<modelo_llm>
+
+7.2 Ejecución
+
+Punto de entrada: run.py
+
+Ejecución básica
+python run.py --issue MULTISTC-31379
+
+Ejecución indicando proyecto destino
+python run.py --issue MULTISTC-31379 --target-project MULTISTC
+
+7.3 Resolución del Issue de entrada
+
+Si no se proporciona --issue, se usa:
+
+MANUAL_ISSUE_KEY=MULTISTC-31379
+
+
+Si no se resuelve ningún issue válido, la ejecución aborta inmediatamente.
+
+7.4 Códigos de salida
+Código	Significado
+0	Ejecución correcta
+10	Rate limit diario
+11	Reintentos agotados
+12	Request too large
+20	Cobertura incompleta (no se crean TCs)
+30	Error Jira / IO
+99	Error no controlado
+8. Conformidad Técnica (MCP / Entorno Corporativo)
 
 Uso exclusivo de variables de entorno estándar.
 
