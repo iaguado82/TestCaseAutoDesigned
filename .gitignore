@@ -1,11 +1,27 @@
-# Ignorar TODOS los archivos de credenciales
-*.env
-.env*
-environment.env
-env_example.txt
+# Variables de entorno y secretos
+.env
+.env.*
+!.env_example
+!.env.template
 
-# Ignorar archivos temporales de Python y editores
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Virtualenv
+.venv/
+venv/
+
+# Logs y dumps
+debug_raw_ai_response_*.txt
+*.log
+
+# IDE
 .vscode/
+.idea/
+
+# OS
 .DS_Store
+Thumbs.db

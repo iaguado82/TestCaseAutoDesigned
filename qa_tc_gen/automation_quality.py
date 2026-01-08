@@ -172,8 +172,19 @@ def append_kpi_block_option_a(manual_desc: str, sc) -> str:
     Opción A: añadir KPIs en la descripción (sin cambiar el JSON).
     Añade bloque SOLO si el escenario trata de transición/carga/animación/tiempos,
     o si es E2E y menciona UI/UX (carrusel, navegación, preview, detalle, animaciones).
+
+    CAMBIO: Si el description YA contiene una sección KPI, no añadimos el bloque genérico
+    para evitar duplicidades (KPI + KPI / Rendimiento).
     """
     base = manual_desc or ""
+
+    # --- NUEVO: guard para evitar duplicidad de KPI ---
+    # Si ya existe un h1. KPI o h1. KPI / Rendimiento en el texto, NO añadimos nada.
+    base_l = base.lower()
+    if "h1. kpi" in base_l:
+        return base
+    # --------------------------------------------------
+
     title = (sc.get("test_title") or "").lower()
     mf = (sc.get("main_function") or "").lower()
     body = (sc.get("formatted_description") or "").lower()

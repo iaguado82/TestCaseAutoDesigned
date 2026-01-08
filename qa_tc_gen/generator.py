@@ -1,5 +1,15 @@
 import re
 
+from .llm_context_config import (
+    LLM_MAX_TOKENS,
+    CHARS_PER_TOKEN,
+    DROP_CONFLUENCE_IF_TOO_LARGE,
+    MAX_TRUTH_CHARS,
+    MAX_CONTEXT_CHARS,
+    MAX_CONFLUENCE_CHARS,
+    LOG_CONTEXT_DECISIONS,
+)
+
 from .config import TARGET_PROJECT
 from .utils_text import strip_html_tags, dump_raw_response
 from .utils_ai_parse import (
@@ -13,7 +23,7 @@ from .utils_ai_parse import (
 from .automation_quality import (
     compute_automation_label,
     append_automation_block_to_description,
-    append_kpi_block_option_a,
+    append_kpi_block_option_a,  # (mantengo import por compatibilidad; KPI está desactivado abajo)
 )
 from .jira_client import (
     get_issue,
@@ -22,7 +32,7 @@ from .jira_client import (
     get_doc_link,
     get_epic_link_key,
     get_dependency_issue_keys,
-    link_issues,  # <-- NUEVO: para vincular también a la US en E2E
+    link_issues,
 )
 from .confluence_client import get_confluence_content
 from .github_models_client import call_github_models
@@ -31,10 +41,13 @@ from .prompts import (
     system_contract_only_missing_json_no_tables,
 )
 
+from .utils_logging import log_scenario_sources
+from .utils_postprocess import to_corporate_template
+
+
 # ---------------------------
-# Presupuestos / límites
+# Presupuestos / límites (no LLM)
 # ---------------------------
-MAX_FULL_CONTEXT_CHARS = 7000
 MAX_TRUTH_BLOCK_CHARS_PER_ISSUE = 8000
 MAX_REFERENCED_JIRA_TICKETS = 8
 MAX_REFERENCED_JIRA_DESC_CHARS = 900
@@ -42,11 +55,18 @@ MAX_EPIC_CONFLUENCE_CHARS = 2500
 MAX_COMPLETION_CONTEXT_CHARS = 3500
 CONTEXT_REFERENCE_DEPTH = 1
 
+MAX_TRUTH_ISSUES = 10
+
+# Reserva defensiva para overhead de mensajes/roles/serialización + variación chars->tokens
+# (si el system prompt es grande, esta reserva evita el 413 por “casi”)
+SAFETY_OVERHEAD_TOKENS = 450
+
+
 # ---------------------------
-# Utilidades parsing / normalización
+# Regex utilidades
 # ---------------------------
-JIRA_KEY_RE = re.compile(r'([A-Z][A-Z0-9]+-\d+)')
-CONF_URL_RE = re.compile(r'https?://confluence\.tid\.es/[^\s\]\)\|\,\>\"\' ]+')
+JIRA_KEY_RE = re.compile(r"([A-Z][A-Z0-9]+-\d+)")
+CONF_URL_RE = re.compile(r"https?://confluence\.tid\.es/[^\s\]\)\|\,\>\"\' ]+")
 
 
 def normalize_jira_wiki(desc: str) -> str:
@@ -62,11 +82,35 @@ def normalize_jira_wiki(desc: str) -> str:
     return s.lstrip("\n")
 
 
-def ask_inventory_and_initial_scenarios(prompt):
+def _clip_text(label: str, text: str, max_chars: int) -> str:
+    if not text:
+        return ""
+    if max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    head = text[: int(max_chars * 0.7)]
+    tail = text[-int(max_chars * 0.25) :]
+    return f"{head}\n\n[... RECORTADO ({label}) ...]\n\n{tail}"
+
+
+def _approx_tokens_from_chars(chars: int) -> int:
+    # CHARS_PER_TOKEN típico ~4. Ajustable por config.
+    if CHARS_PER_TOKEN <= 0:
+        return chars  # fallback seguro
+    return int(chars / CHARS_PER_TOKEN)
+
+
+def _log_context(msg: str):
+    if LOG_CONTEXT_DECISIONS:
+        print(f"INFO CONTEXT: {msg}", flush=True)
+
+
+def ask_inventory_and_initial_scenarios(prompt: str):
     system_content = system_contract_no_tables_inventory_and_json()
     messages = [
         {"role": "system", "content": system_content},
-        {"role": "user", "content": prompt}
+        {"role": "user", "content": prompt},
     ]
     return call_github_models(messages, temperature=0.2, timeout=180)
 
@@ -92,7 +136,7 @@ def ask_missing_scenarios(inventory_text: str, compact_context_prompt: str, miss
 
     messages = [
         {"role": "system", "content": system_content},
-        {"role": "user", "content": user_prompt}
+        {"role": "user", "content": user_prompt},
     ]
     return call_github_models(messages, temperature=0.2, timeout=180)
 
@@ -105,14 +149,90 @@ def _extract_jira_keys_and_conf_urls(text: str):
     return keys, conf_urls
 
 
-def _clip_text(label: str, text: str, max_chars: int) -> str:
-    if not text:
-        return ""
-    if len(text) <= max_chars:
-        return text
-    head = text[: int(max_chars * 0.7)]
-    tail = text[-int(max_chars * 0.25):]
-    return f"{head}\n\n[... RECORTADO ({label}) ...]\n\n{tail}"
+def _estimate_system_tokens_initial() -> int:
+    """
+    Estima tokens del system prompt principal (el más grande).
+    Importante: el 413 te venía de no reservar estos tokens.
+    """
+    sys_txt = system_contract_no_tables_inventory_and_json() or ""
+    # +100 chars de margen por wrappers/variación
+    return _approx_tokens_from_chars(len(sys_txt) + 100)
+
+
+def build_llm_payload(truth_text: str, context_text: str, confluence_text: str) -> dict:
+    """
+    Construye el payload final para LLM con presupuestos y reglas:
+    - truth/context/confluence tienen caps por chars.
+    - Si excede presupuesto REAL del modelo (restando system prompt + overhead):
+      1) drop confluence (si flag)
+      2) recorta context
+      3) recorta truth
+    """
+    # 1) Caps por bloque (chars)
+    truth = _clip_text("truth", truth_text or "", MAX_TRUTH_CHARS)
+    context = _clip_text("context", context_text or "", MAX_CONTEXT_CHARS)
+    confluence = _clip_text("confluence", confluence_text or "", MAX_CONFLUENCE_CHARS)
+
+    # 2) Presupuesto REAL: modelo - system_tokens - overhead
+    system_tokens_est = _estimate_system_tokens_initial()
+    available_user_tokens = max(0, LLM_MAX_TOKENS - system_tokens_est - SAFETY_OVERHEAD_TOKENS)
+    available_user_chars = int(available_user_tokens * CHARS_PER_TOKEN)
+
+    def total_chars(t: str, c: str, cf: str) -> int:
+        # separadores + algo de overhead textual del prompt user
+        return len(t) + len(c) + len(cf) + 650
+
+    def total_tokens(t: str, c: str, cf: str) -> int:
+        return _approx_tokens_from_chars(total_chars(t, c, cf))
+
+    _log_context(
+        f"Budget model={LLM_MAX_TOKENS} | system_tokens_est={system_tokens_est} "
+        f"| overhead_tokens={SAFETY_OVERHEAD_TOKENS} | available_user_tokens={available_user_tokens}"
+    )
+
+    tok = total_tokens(truth, context, confluence)
+    _log_context(f"User payload inicial ~tokens={tok} (chars_budget~{available_user_chars}).")
+
+    dropped_confluence = False
+
+    # 3) Si excede, drop confluence primero
+    if tok > available_user_tokens and DROP_CONFLUENCE_IF_TOO_LARGE and confluence:
+        confluence = ""
+        dropped_confluence = True
+        tok = total_tokens(truth, context, confluence)
+        _log_context(f"Drop CONFLUENCE por tamaño. Nuevo ~tokens={tok}.")
+
+    # 4) Si aún excede, hard clip con reparto (context primero)
+    if tok > available_user_tokens:
+        target_chars = int(available_user_chars * 0.92)  # margen adicional
+        if target_chars <= 0:
+            target_chars = int(LLM_MAX_TOKENS * CHARS_PER_TOKEN * 0.50)
+
+        # Reparto cuando vamos justos: 65% truth, 35% context
+        truth_budget = min(MAX_TRUTH_CHARS, int(target_chars * 0.65))
+        ctx_budget = min(MAX_CONTEXT_CHARS, int(target_chars * 0.35))
+
+        if len(truth) < truth_budget:
+            extra = truth_budget - len(truth)
+            ctx_budget = min(MAX_CONTEXT_CHARS, ctx_budget + extra)
+
+        truth = _clip_text("truth_hard", truth, truth_budget)
+        context = _clip_text("context_hard", context, ctx_budget)
+
+        tok = total_tokens(truth, context, confluence)
+        _log_context(
+            f"Hard clip aplicado. truth_budget={truth_budget} ctx_budget={ctx_budget} -> ~tokens={tok}."
+        )
+
+    return {
+        "truth": truth,
+        "context": context,
+        "confluence": confluence,
+        "dropped_confluence": dropped_confluence,
+        "approx_tokens_user_payload": tok,
+        "system_tokens_est": system_tokens_est,
+        "available_user_tokens": available_user_tokens,
+    }
 
 
 def run_main(us_key: str):
@@ -127,19 +247,42 @@ def run_main(us_key: str):
     if not us_data:
         return
 
-    us_summary = us_data['fields'].get('summary', '')
-    us_description_raw = us_data['fields'].get('description', '') or ""
-    us_description = strip_html_tags(us_description_raw)
+    us_summary = us_data["fields"].get("summary", "")
+    us_description_raw = us_data["fields"].get("description", "") or ""
+    _ = strip_html_tags(us_description_raw)
 
-    print(f"Resumen US: {us_summary}", flush=True)
+    print(f"Resumen US:\n\n{us_summary}", flush=True)
 
-    # 1) TRUTH SOURCES: US + dependencies (is a dependency for)
+    # 1) TRUTH SOURCES
     dependency_keys = get_dependency_issue_keys(us_data)
-    truth_issue_keys = [us_key] + [k for k in dependency_keys if k != us_key]
-    truth_issue_keys = list(dict.fromkeys(truth_issue_keys))
+    truth_seed_keys = [us_key] + [k for k in dependency_keys if k != us_key]
+    truth_seed_keys = list(dict.fromkeys(truth_seed_keys))
 
     if dependency_keys:
         print(f"INFO: Detectadas dependencias (truth candidates): {dependency_keys}", flush=True)
+
+    truth_linked_keys = []
+    for seed_key in truth_seed_keys:
+        seed_data = us_data if seed_key == us_key else get_issue(seed_key)
+        if not seed_data:
+            continue
+        seed_desc_raw = (seed_data.get("fields", {}) or {}).get("description", "") or ""
+        keys_in_desc, _conf = _extract_jira_keys_and_conf_urls(seed_desc_raw)
+        for k in keys_in_desc:
+            if k not in truth_seed_keys and k not in truth_linked_keys and k != us_key:
+                truth_linked_keys.append(k)
+
+    truth_issue_keys = list(dict.fromkeys(truth_seed_keys + truth_linked_keys))
+
+    if len(truth_issue_keys) > MAX_TRUTH_ISSUES:
+        kept = truth_issue_keys[:MAX_TRUTH_ISSUES]
+        dropped = truth_issue_keys[MAX_TRUTH_ISSUES:]
+        truth_issue_keys = kept
+        print(
+            f"WARN: TRUTH ampliado excede MAX_TRUTH_ISSUES={MAX_TRUTH_ISSUES}. "
+            f"Se mantienen: {kept}. Se excluyen de TRUTH: {dropped}",
+            flush=True,
+        )
 
     truth_issues = []
     for key in truth_issue_keys:
@@ -151,14 +294,11 @@ def run_main(us_key: str):
         desc = strip_html_tags(desc_raw)
         desc = _clip_text(f"truth:{key}", desc, MAX_TRUTH_BLOCK_CHARS_PER_ISSUE)
 
-        truth_issues.append({
-            "key": key,
-            "summary": summary,
-            "description": desc,
-            "description_raw": desc_raw,
-        })
+        truth_issues.append(
+            {"key": key, "summary": summary, "description": desc, "description_raw": desc_raw}
+        )
 
-    # 2) ANCHOR para E2E: epic chain
+    # 2) ANCHOR para E2E
     epic_key = get_epic_link_key(us_data)
     parent_epic_key = us_key
 
@@ -171,19 +311,17 @@ def run_main(us_key: str):
             print(f"INFO: Jerarquía vinculación E2E -> {parent_epic_key}", flush=True)
 
     # 3) CONTEXTO AMPLIADO
-    budget_left = MAX_FULL_CONTEXT_CHARS
     extra_context = ""
     visited_issue_keys = set(truth_issue_keys)
 
+    referenced_issue_keys_used = []
+    confluence_urls_used = []
+
     def add_context_block(header: str, body: str):
-        nonlocal extra_context, budget_left
-        if not body or budget_left <= 0:
+        nonlocal extra_context
+        if not body:
             return
-        chunk = f"\n{header}:\n{body}\n"
-        if len(chunk) > budget_left:
-            chunk = chunk[:budget_left]
-        extra_context += chunk
-        budget_left -= len(chunk)
+        extra_context += f"\n{header}:\n{body}\n"
 
     conf_urls_all = []
     referenced_keys_seed = []
@@ -202,16 +340,15 @@ def run_main(us_key: str):
     if conf_urls_all:
         print(f"INFO: Detectados {len(conf_urls_all)} enlaces de Confluence en TRUTH.", flush=True)
         for url in conf_urls_all:
-            if budget_left <= 0:
-                break
             content = get_confluence_content(url) or ""
             if content:
+                confluence_urls_used.append(url)
                 add_context_block(f"DOCUMENTO CONFLUENCE {url}", _clip_text("confluence", content, 1200))
 
     queue = [(k, 1) for k in referenced_keys_seed]
     extracted_count = 0
 
-    while queue and extracted_count < MAX_REFERENCED_JIRA_TICKETS and budget_left > 0:
+    while queue and extracted_count < MAX_REFERENCED_JIRA_TICKETS:
         key, depth = queue.pop(0)
         if key in visited_issue_keys:
             continue
@@ -227,6 +364,7 @@ def run_main(us_key: str):
         desc = _clip_text(f"ref:{key}", desc, MAX_REFERENCED_JIRA_DESC_CHARS)
 
         print(f"INFO: Contexto extraído de ticket vinculado (ref): {key}", flush=True)
+        referenced_issue_keys_used.append(key)
         add_context_block(f"INFO TICKET REFERENCIADO {key} | {summary}", desc)
 
         visited_issue_keys.add(key)
@@ -241,17 +379,33 @@ def run_main(us_key: str):
                 if k2 not in visited_issue_keys and k2 not in truth_issue_keys:
                     queue.append((k2, depth - 1))
 
+    # Documentación de épica/anchor (CONTEXTO)
     contexto_epica = ""
     parent_data = get_issue(parent_epic_key) if parent_epic_key else None
     doc_url = get_doc_link(parent_data) if parent_data else None
     if doc_url:
         print(f"INFO: Consultando documentación de la Épica/Anchor: {doc_url}", flush=True)
         contexto_epica = get_confluence_content(doc_url) or ""
+        if contexto_epica:
+            confluence_urls_used.append(doc_url)
         contexto_epica = _clip_text("epic_confluence", contexto_epica, MAX_EPIC_CONFLUENCE_CHARS)
 
-    full_context = f"{extra_context}\n{contexto_epica}".strip()
+    context_provenance = {
+        "truth_issues": truth_issue_keys,
+        "referenced_issues": list(dict.fromkeys(referenced_issue_keys_used)),
+        "confluence_urls": list(dict.fromkeys(confluence_urls_used)),
+        "anchor_epic": parent_epic_key,
+    }
 
-    # 4) Prompt inicial
+    print("\n" + "=" * 50, flush=True)
+    print("TRAZABILIDAD GLOBAL DE CONTEXTO (TRUTH + CONTEXTO ADICIONAL):", flush=True)
+    print(f"- Truth issues (seed+linked): {context_provenance['truth_issues']}", flush=True)
+    print(f"- Referenced issues usados (context): {context_provenance['referenced_issues']}", flush=True)
+    print(f"- Confluence usado (context): {context_provenance['confluence_urls']}", flush=True)
+    print(f"- Anchor E2E: {context_provenance['anchor_epic']}", flush=True)
+    print("=" * 50 + "\n", flush=True)
+
+    # 4) TRUTH TEXT
     truth_blocks = []
     for t in truth_issues:
         truth_blocks.append(
@@ -261,15 +415,23 @@ def run_main(us_key: str):
         )
     truth_text = "\n\n---\n\n".join(truth_blocks)
 
-    compact_completion_context = (
-        "FUENTE DE VERDAD (TRUTH SOURCES):\n"
-        f"{_clip_text('truth_compact', truth_text, 2200)}\n\n"
-        "CONTEXTO ADICIONAL (RESUMIDO):\n"
-        f"{_clip_text('ctx_compact', full_context, 1200)}\n"
+    # 5) Payload LLM con control REAL
+    payload = build_llm_payload(
+        truth_text=truth_text,
+        context_text=extra_context,
+        confluence_text=contexto_epica,
     )
-    if len(compact_completion_context) > MAX_COMPLETION_CONTEXT_CHARS:
-        compact_completion_context = compact_completion_context[:MAX_COMPLETION_CONTEXT_CHARS]
 
+    if LOG_CONTEXT_DECISIONS:
+        print("\n" + "=" * 60, flush=True)
+        print("LLM CONTEXT DEBUG (ANTES DE LLAMAR A IA)", flush=True)
+        print(f"- system_tokens_est: {payload.get('system_tokens_est')} (incluye contrato inicial)", flush=True)
+        print(f"- available_user_tokens: {payload.get('available_user_tokens')}", flush=True)
+        print(f"- user_payload_tokens_est: {payload.get('approx_tokens_user_payload')}", flush=True)
+        print(f"- dropped_confluence: {payload.get('dropped_confluence')}", flush=True)
+        print("=" * 60 + "\n", flush=True)
+
+    # 6) Prompt inicial (usa payload recortado)
     base_user_prompt = f"""
 ### MANDATO DE GENERACIÓN MASIVA (100% COBERTURA)
 Analiza cada frase de la FUENTE DE VERDAD y su contexto técnico vinculado.
@@ -282,15 +444,6 @@ Analiza cada frase de la FUENTE DE VERDAD y su contexto técnico vinculado.
 - Si el punto es puramente de datos/backend (orden, filtros, exclusiones), marca scope="System".
 - Intenta que ~30-40% de escenarios sean E2E cuando el feature sea principalmente UI.
 
-### KPI / RENDIMIENTO (OPCIÓN A) - OBLIGATORIO CUANDO APLIQUE
-- Cuando el escenario implique transiciones, carga de pantallas, render/preview, animaciones o navegación,
-  añade al final de formatted_description:
-  h1. KPI / Rendimiento (si aplica)
-  ----
-  * Define 1-3 KPIs con Start/End (evento), método (prioridad logs/telemetría; alternativa driver),
-    repeticiones (>=5) y criterio (baseline o umbral).
-- No inventes herramientas internas; si faltan logs, sugiere 'instrumentar eventos *_start/*_ready'.
-
 ### AUTOMATIZACIÓN (OBLIGATORIO EN JSON)
 - Para cada escenario, rellena SIEMPRE: automation_candidate, automation_type, automation_code.
 - Si automation_candidate=true:
@@ -299,11 +452,20 @@ Analiza cada frase de la FUENTE DE VERDAD y su contexto técnico vinculado.
   - automation_code >= 600 caracteres con imports + setup + navegación + locators + asserts + teardown
 
 ### FUENTE DE VERDAD (TRUTH SOURCES)
-{truth_text}
+{payload['truth']}
 
-### CONTEXTO ADICIONAL (APOYO: issues referenciados + confluence + épica/anchor)
-{full_context}
+### CONTEXTO ADICIONAL (APOYO)
+{payload['context']}
+"""
 
+    if payload.get("confluence"):
+        base_user_prompt += f"""
+
+### DOCUMENTACIÓN DE ÉPICA/ANCHOR (APOYO)
+{payload['confluence']}
+"""
+
+    base_user_prompt += """
 ### TAREA
 Devuelve:
 - Inventario Técnico (1..N) + TOTAL_INVENTARIO: N
@@ -333,7 +495,22 @@ Devuelve:
     if not isinstance(scenarios, list):
         scenarios = []
 
-    # Completado missing
+    # 8) Compact context para missing
+    compact_completion_context = (
+        "FUENTE DE VERDAD (TRUTH SOURCES):\n"
+        f"{payload['truth']}\n\n"
+        "CONTEXTO ADICIONAL (APOYO):\n"
+        f"{payload['context']}\n"
+    )
+    if payload.get("confluence"):
+        compact_completion_context += (
+            "\nDOCUMENTACIÓN DE ÉPICA/ANCHOR (APOYO):\n"
+            f"{payload['confluence']}\n"
+        )
+    if len(compact_completion_context) > MAX_COMPLETION_CONTEXT_CHARS:
+        compact_completion_context = compact_completion_context[:MAX_COMPLETION_CONTEXT_CHARS]
+
+    # 9) Completado missing
     MAX_COMPLETION_ATTEMPTS = 6
     BATCH_SIZE = 5
 
@@ -347,7 +524,7 @@ Devuelve:
         print(
             f"INFO: Faltan {len(missing)} escenarios para completar cobertura 1..{n_total}. "
             f"Intento {attempt}/{MAX_COMPLETION_ATTEMPTS}",
-            flush=True
+            flush=True,
         )
 
         batch = missing[:BATCH_SIZE]
@@ -386,19 +563,15 @@ Devuelve:
         print("INFO: No se crearán Test Cases en Jira para evitar cobertura parcial.", flush=True)
         return
 
-    # Crear TCs
+    # 10) Crear TCs
     print(f"INFO: Cobertura OK. Procesando {len(scenarios)} escenarios generados...", flush=True)
-
     scenarios_sorted = sorted(scenarios, key=lambda x: int(x.get("inventory_id", 0)))
 
     for sc in scenarios_sorted:
-        title = sc.get('test_title', 'Test')
-        scope = sc.get('scope', 'System')
+        title = sc.get("test_title", "Test")
+        scope = sc.get("scope", "System")
         is_e2e = scope.lower() in ["e2e", "end2end"]
 
-        # Link primario:
-        # - E2E: anchor/JEFE
-        # - System: US
         link_target_primary = parent_epic_key if is_e2e else us_key
 
         summary_base = f"[{sc.get('main_function', 'QA')}] {title}"
@@ -408,14 +581,20 @@ Devuelve:
             f"DEBUG AUTO inventory_id={sc.get('inventory_id')} "
             f"cand={sc.get('automation_candidate')} type={sc.get('automation_type')} "
             f"code_len={len((sc.get('automation_code') or '').strip())}",
-            flush=True
+            flush=True,
         )
 
         automation_candidate_value = compute_automation_label(sc)
 
-        manual_desc = normalize_jira_wiki(sc.get('formatted_description', '') or "")
-        desc_with_kpi = normalize_jira_wiki(append_kpi_block_option_a(manual_desc, sc))
-        final_desc = append_automation_block_to_description(desc_with_kpi, sc)
+        manual_desc = normalize_jira_wiki(sc.get("formatted_description", "") or "")
+
+        # KPI desactivado (acordado)
+        # manual_desc = normalize_jira_wiki(append_kpi_block_option_a(manual_desc, sc))
+
+        final_manual = to_corporate_template(manual_desc)
+        final_desc = append_automation_block_to_description(final_manual, sc)
+
+        log_scenario_sources(sc, context_provenance)
 
         tc_key = create_test_case(
             TARGET_PROJECT,
@@ -424,12 +603,10 @@ Devuelve:
             link_target_primary,
             scope,
             "Manual",
-            automation_candidate_value=automation_candidate_value
+            automation_candidate_value=automation_candidate_value,
         )
 
-        # NUEVO: Si es E2E, además de linkar a JEFE/anchor, también linkar a la US
         if tc_key and is_e2e:
-            # Evita duplicar si por configuración el anchor fuese la propia US
             if us_key and link_target_primary != us_key:
                 link_issues(us_key, tc_key)
 
