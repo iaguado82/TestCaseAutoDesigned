@@ -1,106 +1,236 @@
-A Intelligence Workflow: Automatización de Test Cases con IA (TID)
+A-Intelligence Workflow
+Automatización avanzada de Test Cases con IA (Telefónica I+D)
 
-Este proyecto implementa un flujo automatizado de diseño de pruebas para Telefónica (TID), integrando Jira, Confluence y GitHub Copilot para transformar User Stories en Test Cases técnicos y estructurados sin intervención manual.
+Este proyecto implementa un flujo automatizado, seguro y auditable para el diseño de Test Cases a partir de User Stories en entornos Telefónica (TID), integrando Jira, Confluence y modelos LLM corporativos (GitHub Copilot / GitHub Models).
 
-1. Arquitectura del Sistema
+El sistema transforma requisitos funcionales dispersos (User Stories, dependencias, épicas y documentación técnica) en Test Cases manuales estructurados, con clasificación de automatización, KPIs de rendimiento y vinculación jerárquica completa, sin intervención humana en el diseño.
 
-El sistema opera mediante una arquitectura orientada a eventos, utilizando GitHub Actions como motor de ejecución seguro.
+Arquitectura del Sistema
 
-Diagrama de Flujo (Mermaid)
+El sistema sigue una arquitectura orientada a eventos y determinista, con control explícito del contexto y del presupuesto de tokens, diseñada para operar en entornos corporativos con restricciones de seguridad y trazabilidad.
 
-graph TD
-    A[Jira TID: User Story Created] -->|Webhook| B[GitHub Actions Runner]
-    B --> C{Context Gathering}
-    C -->|API Jira| D[Identify Epic & Parent Epic]
-    D -->|API Confluence| E[Extract Tech Specs Field 22398]
-    E --> F[GitHub Copilot API GPT-4]
-    F -->|Reasoning| G[Generate Test Scenarios]
-    G --> H[Create TCs in MULTISTC]
-    H -->|Link| A
-    H -->|Labels| I[IA_manual / IA_automatico]
+Flujo conceptual:
 
+Una User Story se selecciona como punto de entrada.
 
-Detalle del Proceso
+El sistema resuelve la fuente real de requisitos (truth sources).
 
-Disparador: Una regla de Jira Automation envía un repository_dispatch a GitHub.
+Se expande contexto técnico de apoyo de forma controlada.
 
-Recolección de Contexto: El script navega jerárquicamente: US -> Épica -> Épica Superior (relación is child of). Extrae la documentación técnica de Confluence vinculada.
+Se genera inventario técnico y escenarios bajo contrato estricto.
 
-Generación: Se envía el contexto a la API de Copilot bajo contrato Enterprise.
+Se valida cobertura completa antes de crear cualquier Test Case.
 
-Acción Final: Se crean dos versiones por cada escenario (Manual y Automática con Selenium) en el proyecto MULTISTC, vinculándolos a la US original.
+Se publican los Test Cases en Jira con enlaces jerárquicos correctos.
 
-2. Análisis de Seguridad y Privacidad
+Modelo Conceptual Clave
 
-Para cumplir con las normativas de seguridad de Telefónica, el diseño se basa en tres pilares fundamentales:
+2.1 Separación estricta de responsabilidades
 
-A. Soberanía de Datos
+El sistema distingue explícitamente entre dos tipos de información:
 
-No Entrenamiento: Al utilizar GitHub Copilot Enterprise, los prompts enviados no se utilizan para entrenar modelos globales.
+A) Fuente de Verdad (Truth Sources)
 
-Procesamiento Efímero: Los datos se procesan en memoria y se descartan tras generar la respuesta.
+Información prioritaria y obligatoria para el diseño de pruebas:
 
-Contrato Corporativo: Operamos bajo el paraguas legal de Telefónica con Microsoft/GitHub.
+La User Story ejecutada (descripción completa, siempre procesada al 100%).
 
-B. Gestión de Secretos e Identidad
+Issues enlazados mediante el tipo de relación “is a dependency for” (configurable), cuando el requisito funcional real reside fuera de la US original.
 
-Mínimos Privilegios: Los tokens (PATs) están limitados exclusivamente a las acciones de lectura/escritura necesarias.
+Estas fuentes constituyen la base semántica del inventario y nunca se omiten.
 
-GitHub Secrets: Las credenciales nunca están en el código; se almacenan cifradas en el repositorio.
+B) Contexto Ampliado (Supporting Context)
 
-Trazabilidad: Todas las acciones en Jira quedan registradas bajo el usuario asociado al token (id02621).
+Información de apoyo para mejorar precisión y cobertura:
 
-C. Seguridad en Tránsito y Ejecución
+Issues Jira mencionados en las descripciones de las fuentes de verdad.
 
-Cifrado TLS: Comunicaciones vía HTTPS cifradas (TLS 1.2+).
+Documentación Confluence enlazada explícitamente.
 
-Aislamiento: Los Runners de GitHub Actions son contenedores efímeros que se destruyen tras el uso.
+Documentación técnica asociada a la épica o anchor.
 
-3. Configuración y Despliegue
+Jerarquía de épicas (Epic → Parent Epic).
 
-Requisitos Previos
+Este contexto está limitado por presupuesto para evitar errores de tamaño o saturación del modelo.
 
-Python 3.10+
+Resolución de Jerarquía y Enlaces
 
-Acceso a la API de Jira y Confluence TID.
+3.1 Cadena funcional soportada
 
-GITHUB_TOKEN con permisos de Copilot.
+El sistema soporta múltiples topologías de proyecto:
 
-Instalación Local
+Proyectos donde la US contiene toda la definición funcional.
 
-Clona el repositorio.
+Proyectos donde la US actúa como contenedor y la definición reside en otra US dependiente.
 
-Crea un archivo .env basado en env_example.txt.
+Proyectos con distintos nombres de relaciones Jira (configurables por entorno).
 
-Instala dependencias:
+3.2 Reglas de enlace de Test Cases
 
-pip install requests python-dotenv
+Test Cases System:
 
+Se vinculan únicamente a la User Story ejecutada.
 
-Ejecuta una prueba manual:
+Test Cases End-to-End (E2E):
 
-export MANUAL_ISSUE_KEY="PROJ-123"
-python generate_tests_copilot.py
+Se vinculan a la épica anchor (por ejemplo JEFE-XXX).
 
+Y adicionalmente a la User Story.
 
-Despliegue en GitHub Actions
+Esto garantiza trazabilidad completa:
 
-Configura los siguientes Secrets en tu repositorio:
+Visión E2E a nivel programa o iniciativa.
 
-JIRA_PERSONAL_TOKEN
+Visión funcional a nivel de User Story.
 
-CONFLUENCE_PERSONAL_TOKEN
+Flujo de Generación de Pruebas
 
-GITHUB_TOKEN (Suministrado automáticamente por GitHub o un PAT específico).
+Paso 1 – Recolección de Verdad
 
-4. Conformidad Técnica (MCP Compliance)
+Se procesa íntegramente la descripción de la User Story.
 
-El script respeta las restricciones del entorno MCP (Model Context Protocol):
+Se detectan automáticamente issues enlazados por dependencia.
 
-Uso de variables de entorno estándar (JIRA_USERNAME, CONFLUENCE_URL).
+Estos issues se incorporan como fuentes de verdad adicionales.
+
+Paso 2 – Expansión de Contexto
+
+Se extraen referencias a otros issues Jira.
+
+Se procesan enlaces Confluence.
+
+Se controla profundidad, deduplicación y tamaño total del contexto.
+
+Paso 3 – Generación bajo Contrato
+El modelo LLM opera bajo un contrato estricto que exige:
+
+Inventario técnico numerado de 1 a N.
+
+Correspondencia exacta 1:1 entre inventario y escenarios.
+
+Clasificación System / E2E basada en heurística UI/UX.
+
+Inclusión obligatoria de los campos:
+
+automation_candidate
+
+automation_type
+
+automation_code (solo si procede)
+
+Paso 4 – Validación y Completado
+
+Si el modelo no devuelve cobertura completa:
+
+Se lanzan iteraciones de completado por IDs exactos.
+
+Se usa contexto compacto para evitar rate limits.
+
+Si no se alcanza cobertura total:
+
+No se crea ningún Test Case en Jira.
+
+Paso 5 – Post-procesado previo a Jira
+Antes de publicar:
+
+Normalización de Jira Wiki Markup.
+
+Inserción automática de:
+
+KPIs de rendimiento cuando aplica.
+
+Bloque informativo de automatización.
+
+Conversión opcional a tablas corporativas mediante post-proceso local, sin consumo de tokens.
+
+Seguridad y Privacidad
+
+5.1 Soberanía de Datos
+
+Los prompts no se utilizan para entrenar modelos globales.
+
+Los datos se procesan únicamente en memoria.
+
+Se opera bajo contratos Enterprise con proveedores aprobados.
+
+5.2 Gestión de Credenciales
+
+Uso exclusivo de variables de entorno.
+
+Tokens con principio de mínimo privilegio.
+
+Ningún secreto se versiona en el código.
+
+Todas las acciones quedan trazadas en Jira bajo el usuario asociado al token.
+
+5.3 Seguridad en tránsito y ejecución
+
+Comunicaciones cifradas mediante HTTPS (TLS 1.2 o superior).
+
+Sin persistencia local de datos sensibles.
+
+Compatible con ejecución local controlada y runners efímeros corporativos.
+
+Control de Tokens y Estabilidad
+
+El sistema incorpora defensas explícitas contra errores habituales en LLMs:
+
+413 Request Too Large.
+
+429 Rate Limit Reached.
+
+Mediante:
+
+Presupuestos de contexto configurables.
+
+Separación clara entre truth sources y contexto.
+
+Iteraciones de completado en lotes pequeños.
+
+Uso de contexto compacto en reintentos.
+
+Esto garantiza estabilidad incluso en User Stories complejas con múltiples dependencias.
+
+Configuración y Uso
+
+Requisitos:
+
+Python 3.10 o superior.
+
+Acceso a Jira y Confluence TID.
+
+Token corporativo para GitHub Copilot / GitHub Models.
+
+Archivo .env (ejemplo):
+
+JIRA_URL=https://jira.tid.es/
+
+CONFLUENCE_URL=https://confluence.tid.es/
+
+JIRA_USERNAME=id02621
+JIRA_PERSONAL_TOKEN=***
+CONFLUENCE_PERSONAL_TOKEN=***
+
+GITHUB_TOKEN=***
+
+TARGET_PROJECT=MULTISTC
+MANUAL_ISSUE_KEY=MULTISTC-12345
+
+DEPENDENCY_LINK_NAMES=is a dependency for
+PARENT_EPIC_LINK_NAMES=is child of
+
+Ejecución:
+
+python run.py --issue MULTISTC-12345
+
+Conformidad Técnica (MCP / Entorno Corporativo)
+
+Uso exclusivo de variables de entorno estándar.
 
 Autenticación mediante Bearer Tokens.
 
-Compatibilidad con contenedores Docker Atlassian de TID.
+Sin dependencias no auditables.
 
-Documentación generada para el equipo de QA Senior - Telefónica I+D
+Compatible con políticas MCP (Model Context Protocol).
+
+Código estructurado, trazable y revisable para QA Senior y auditorías internas.
