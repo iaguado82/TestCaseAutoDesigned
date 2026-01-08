@@ -332,6 +332,7 @@ Compatible con políticas MCP (Model Context Protocol).
 
 Código estructurado, trazable y revisable para QA Senior y auditorías internas.
 
+```mermaid
 flowchart TD
     A[run.py<br/>CLI entrypoint] --> B[qa_tc_gen/generator.py<br/>run_main()]
 
@@ -363,3 +364,55 @@ flowchart TD
 
     %% Output
     F --> Z[Jira<br/>Test Cases created + links]
+
+sequenceDiagram
+    autonumber
+
+    participant CLI as run.py<br/>CLI
+    participant GEN as generator.py<br/>run_main()
+    participant CTX as context_builder.py
+    participant BUD as llm_budget.py
+    participant LLM as scenario_engine.py
+    participant PUB as publisher.py
+    participant JIRA as Jira / Confluence
+    participant MODEL as LLM Corporativo
+
+    CLI->>GEN: run_main(issue_key, target_project)
+
+    %% Context resolution
+    GEN->>CTX: build_truth_sources(issue)
+    CTX->>JIRA: get_issue(), get_dependency_issue_keys()
+    JIRA-->>CTX: US + dependencias
+
+    GEN->>CTX: resolve_anchor_epic()
+    CTX->>JIRA: get_epic_link_key(), get_parent_epic_key()
+
+    GEN->>CTX: build_additional_context()
+    CTX->>JIRA: get_issue() refs
+    CTX->>JIRA: get_confluence_content()
+
+    GEN->>CTX: build_epic_context()
+    CTX->>JIRA: get_doc_link() + confluence
+
+    %% Payload preparation
+    GEN->>CTX: build_truth_text()
+    GEN->>BUD: build_llm_payload(truth, context, confluence)
+    BUD-->>GEN: payload recortado + métricas
+
+    %% LLM generation
+    GEN->>LLM: generate_scenarios_with_full_coverage(payload)
+    LLM->>MODEL: call_github_models()<br/>inventario + escenarios
+    MODEL-->>LLM: respuesta inicial
+
+    LLM->>MODEL: call_github_models()<br/>completado missing (si aplica)
+    MODEL-->>LLM: escenarios faltantes
+
+    LLM-->>GEN: escenarios validados (100% cobertura)
+
+    %% Publishing
+    GEN->>PUB: publish_test_cases(scenarios)
+    PUB->>JIRA: create_test_case()
+    PUB->>JIRA: link_issues()
+
+    PUB-->>GEN: resumen creación
+    GEN-->>CLI: exit code
